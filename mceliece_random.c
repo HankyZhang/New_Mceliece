@@ -173,112 +173,197 @@ static void get_field_poly_F(polynomial_t *F_y) {
     }
 }
 
+static polynomial_t* ext_zero(int t) {
+    polynomial_t *z = polynomial_create(t - 1);
+    return z; // already zero
+}
+
+static polynomial_t* ext_one(int t) {
+    polynomial_t *o = polynomial_create(t - 1);
+    polynomial_set_coeff(o, 0, 1);
+    return o;
+}
+
+static void ext_copy(polynomial_t *dst, const polynomial_t *src) {
+    polynomial_copy(dst, src);
+}
+
+static void ext_add(polynomial_t *out, const polynomial_t *a, const polynomial_t *b) {
+    polynomial_add(out, a, b);
+}
+
+static void ext_mul(polynomial_t *out, const polynomial_t *a, const polynomial_t *b, const polynomial_t *F) {
+    polynomial_t *tmp = polynomial_create(2 * (F->degree) - 2);
+    polynomial_mul(tmp, a, b);
+    polynomial_div(NULL, out, tmp, F);
+    polynomial_free(tmp);
+}
+
+static void ext_qpower(polynomial_t *out, const polynomial_t *a, const polynomial_t *F, int m) {
+    // raise a to q=2^m inside F_{q^t}
+    polynomial_t *acc = polynomial_create(F->degree - 1);
+    polynomial_t *tmp = polynomial_create(F->degree - 1);
+    polynomial_t *sq_tmp = polynomial_create(2 * (F->degree) - 2);
+    ext_copy(acc, a);
+
+    for (int i = 0; i < m; i++) {
+        // square: acc = acc^2
+        // compute poly_mul(acc, acc) then mod F
+        polynomial_mul(sq_tmp, acc, acc);
+        polynomial_div(NULL, tmp, sq_tmp, F);
+        ext_copy(acc, tmp);
+        // additionally square coefficients (Frobenius on base field)
+        // Note: already accounted inside polynomial_mul over GF(2^m)
+    }
+
+    ext_copy(out, acc);
+    polynomial_free(acc);
+    polynomial_free(tmp);
+    polynomial_free(sq_tmp);
+}
+
+static int ext_equal(const polynomial_t *a, const polynomial_t *b) {
+    if (a->degree != b->degree) return 0;
+    for (int i = 0; i <= a->degree; i++) {
+        if (a->coeffs[i] != b->coeffs[i]) return 0;
+    }
+    return 1;
+}
+
+static int ext_is_in_Fq(const polynomial_t *a) {
+    return a->degree <= 0; // degree -1 (zero) or 0 (constant)
+}
+
+static gf_elem_t ext_const_term(const polynomial_t *a) {
+    return (a->degree >= 0) ? a->coeffs[0] : 0;
+}
+
+// Helpers for irreducibility test over F_{2^m}
+static int poly_equal(const polynomial_t *a, const polynomial_t *b) {
+    if (a->degree != b->degree) return 0;
+    for (int i = 0; i <= a->degree; i++) if (a->coeffs[i] != b->coeffs[i]) return 0;
+    return 1;
+}
+
+static void poly_square_mod(polynomial_t *out, const polynomial_t *a, const polynomial_t *mod) {
+    int cap = 2 * (mod->degree) - 2;
+    if (cap < 0) cap = 0;
+    polynomial_t *tmp = polynomial_create(cap);
+    polynomial_mul(tmp, a, a);
+    polynomial_div(NULL, out, tmp, mod);
+    polynomial_free(tmp);
+}
+
+static void poly_qpower_mod(polynomial_t *out, const polynomial_t *a, const polynomial_t *mod, int m) {
+    int cap = (mod->degree > 0) ? (mod->degree - 1) : 0;
+    polynomial_t *acc = polynomial_create(cap);
+    polynomial_t *tmp = polynomial_create(cap);
+    polynomial_copy(acc, a);
+    for (int i = 0; i < m; i++) {
+        poly_square_mod(tmp, acc, mod);
+        polynomial_copy(acc, tmp);
+    }
+    polynomial_copy(out, acc);
+    polynomial_free(acc);
+    polynomial_free(tmp);
+}
+
+static void poly_add_inplace(polynomial_t *a, const polynomial_t *b) {
+    polynomial_add(a, a, b);
+}
+
+static int t_prime_divisors(int t, int *divs, int max) {
+    int count = 0;
+    int n = t;
+    for (int p = 2; p*p <= n; p++) {
+        if (n % p == 0) {
+            divs[count++] = p;
+            if (count >= max) break;
+            while (n % p == 0) n /= p;
+        }
+    }
+    if (n > 1 && count < max) divs[count++] = n;
+    return count;
+}
+
+static int is_irreducible_over_Fqm(const polynomial_t *g, int m) {
+    int t = g->degree;
+    if (t <= 0) return 0;
+    if (t != MCELIECE_T) return 0;
+    // 1) Check monic
+    if (g->coeffs[t] != 1) return 0;
+
+    // 2) x^{q^t} ≡ x (mod g)
+    polynomial_t *x = polynomial_create(t - 1);
+    polynomial_set_coeff(x, 1, 1);
+    polynomial_t *h = polynomial_create(t - 1);
+    polynomial_copy(h, x);
+    for (int i = 0; i < t; i++) {
+        poly_qpower_mod(h, h, g, m); // h = h^{q} mod g
+    }
+    int ok1 = poly_equal(h, x);
+
+    if (!ok1) {
+        polynomial_free(x); polynomial_free(h);
+        return 0;
+    }
+
+    // 3) For each distinct prime r | t: gcd(x^{q^{t/r}} - x, g) == 1
+    int divs[16];
+    int nd = t_prime_divisors(t, divs, 16);
+    polynomial_t *u = polynomial_create(t - 1);
+    polynomial_t *tmp = polynomial_create(t - 1);
+    polynomial_t *gcd = polynomial_create(t - 1);
+
+    for (int i = 0; i < nd; i++) {
+        int r = divs[i];
+        int e = t / r;
+        polynomial_copy(u, x);
+        for (int j = 0; j < e; j++) {
+            poly_qpower_mod(u, u, g, m);
+        }
+        // u = x^{q^{e}} mod g; compute u - x = u + x
+        polynomial_copy(tmp, u);
+        poly_add_inplace(tmp, x);
+
+        polynomial_gcd(gcd, g, tmp);
+        if (gcd->degree > 0) { // non-trivial gcd
+            polynomial_free(x); polynomial_free(h);
+            polynomial_free(u); polynomial_free(tmp); polynomial_free(gcd);
+            return 0;
+        }
+    }
+
+    polynomial_free(x); polynomial_free(h);
+    polynomial_free(u); polynomial_free(tmp); polynomial_free(gcd);
+    return 1;
+}
+
 // 最终版，包含内部自检逻辑
 mceliece_error_t generate_irreducible_poly_final(polynomial_t *g, const uint8_t *random_bits) {
+    printf("      -> girr: g=%p coeffs=%p maxdeg=%d rand=%p\n", (void*)g, (void*)g->coeffs, g->max_degree, (void*)random_bits); fflush(stdout);
+    printf("    -> generate_irreducible_poly: start. t=%d m=%d\n", MCELIECE_T, MCELIECE_M); fflush(stdout);
+
+    if (!g || !g->coeffs) return MCELIECE_ERROR_KEYGEN_FAIL;
+
     int t = MCELIECE_T;
     int m = MCELIECE_M;
-    mceliece_error_t ret = MCELIECE_SUCCESS;
 
-    // --- 准备工作 ---
-    polynomial_t *F_y = polynomial_create(t);
-    polynomial_t *beta_poly = polynomial_create(t - 1);
-    matrix_fq_t *A = matrix_fq_create(t, t);
-    gf_elem_t *b = malloc(t * sizeof(gf_elem_t));
-    polynomial_t *last_power = polynomial_create(t - 1);
-    polynomial_t *temp_power = polynomial_create(2 * t - 2);
-    polynomial_t *temp_mod = polynomial_create(t - 1);
-    gf_elem_t *solution = NULL;
+    // Build candidate g(x) from bits: monic degree t
+    memset(g->coeffs, 0, (g->max_degree + 1) * sizeof(gf_elem_t));
+    g->degree = -1;
 
-    if (!F_y || !beta_poly || !A || !b || !last_power || !temp_power || !temp_mod) {
-        ret = MCELIECE_ERROR_MEMORY;
-        goto cleanup;
-    }
-
-    get_field_poly_F(F_y);
-
-    // --- 1. 构造 beta 多项式 ---
     for (int j = 0; j < t; j++) {
         int offset = j * 2;
-        gf_elem_t beta_j = (gf_elem_t)random_bits[offset] | (gf_elem_t)(random_bits[offset+1] << 8);
-        beta_j &= (1 << m) - 1;
-        polynomial_set_coeff(beta_poly, j, beta_j);
-    }
-
-    // --- 2. 构造矩阵 A 和向量 b ---
-    polynomial_set_coeff(last_power, 0, 1); // beta^0 = 1
-    for (int i = 0; i < t; i++) {
-         A->data[i * t + 0] = (i == 0) ? 1 : 0;
-    }
-
-    for (int k = 1; k <= t; k++) {
-        polynomial_mul(temp_power, last_power, beta_poly);
-        polynomial_div(NULL, temp_mod, temp_power, F_y);
-
-        if (k < t) {
-            for (int i = 0; i < t; i++) {
-                A->data[i * t + k] = (i <= temp_mod->degree) ? temp_mod->coeffs[i] : 0;
-            }
-        } else {
-            for (int i = 0; i < t; i++) {
-                b[i] = (i <= temp_mod->degree) ? temp_mod->coeffs[i] : 0;
-            }
-        }
-        polynomial_copy(last_power, temp_mod);
-    }
-
-    // --- 3. 求解线性方程组 ---
-    solution = solve_linear_system(A, b);
-
-    if (!solution) {
-        ret = MCELIECE_ERROR_KEYGEN_FAIL;
-        goto cleanup;
-    }
-
-    // --- 4. 构造多项式 g ---
-    for(int i = 0; i < t; i++) {
-        polynomial_set_coeff(g, i, solution[i]);
+        gf_elem_t c = (gf_elem_t)random_bits[offset] | (gf_elem_t)(random_bits[offset+1] << 8);
+        c &= (1 << m) - 1;
+        polynomial_set_coeff(g, j, c);
     }
     polynomial_set_coeff(g, t, 1);
 
-    if (g->degree != t) {
-        ret = MCELIECE_ERROR_KEYGEN_FAIL;
-        goto cleanup;
-    }
-
-    // =============================================================
-    //   5. 核心自检：验证我们计算出的 g 是否满足 g(beta) = 0
-    // =============================================================
-    printf("    -> generate_irreducible_poly: Verifying g(beta) == 0...\n");
-    polynomial_t *check_result = polynomial_create(t - 1);
-    if (!check_result) {
-        ret = MCELIECE_ERROR_MEMORY;
-        goto cleanup;
-    }
-
-    polynomial_eval_at_poly(check_result, g, beta_poly, F_y);
-
-    if (!polynomial_is_zero(check_result)) {
-        printf("    -> FATAL INTERNAL ERROR! Calculated g does not satisfy g(beta) = 0.\n");
-        printf("    -> The math in polynomial or linear algebra functions is likely wrong.\n");
-        ret = MCELIECE_ERROR_KEYGEN_FAIL;
-    } else {
-        printf("    -> Verification successful: g(beta) is indeed 0.\n");
-    }
-    polynomial_free(check_result);
-
-
-cleanup:
-    // --- 统一清理所有分配的内存 ---
-    polynomial_free(F_y);
-    polynomial_free(beta_poly);
-    matrix_fq_free(A);
-    free(b);
-    polynomial_free(last_power);
-    polynomial_free(temp_power);
-    polynomial_free(temp_mod);
-    free(solution);
-
-    return ret;
+    int ok = is_irreducible_over_Fqm(g, m);
+    printf("      -> girr: candidate degree=%d irreducible=%d\n", g->degree, ok); fflush(stdout);
+    return ok ? MCELIECE_SUCCESS : MCELIECE_ERROR_KEYGEN_FAIL;
 }
 
 

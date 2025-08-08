@@ -12,37 +12,26 @@ gf_elem_t *gf_antilog = NULL;
  * 它使用标准的“俄罗斯农夫乘法”(位移和异或)算法。
  */
 static gf_elem_t gf_mul_for_init(gf_elem_t a, gf_elem_t b) {
-    // Classic McEliece m=13 的不可约多项式是 x^13 + x^4 + x^3 + x + 1
-    // 这对应于二进制的 0b1 0000 0000 11011 = 0x201B
-    // 我们需要的是去掉最高位的多项式，用于约简：0x001B
     const gf_elem_t reducing_poly = 0x001B;
+    const gf_elem_t mask = (1u << MCELIECE_M) - 1u;
     gf_elem_t r = 0;
 
-    // 我们将循环 m 次 (m=13)
     for (int i = 0; i < MCELIECE_M; i++) {
-        // 如果 b 的当前最低位是 1
         if (b & 1) {
             r ^= a;
         }
-
-        // b 右移一位，准备处理下一位
         b >>= 1;
 
-        // a 左移一位 (相当于 a = a * x)
-        // 检查最高位 (x^12) 是否为 1
-        if (a & (1 << (MCELIECE_M - 1))) {
-            // 如果是，左移后会溢出，需要进行模约简
-            // 1. 先左移
+        if (a & (1u << (MCELIECE_M - 1))) {
             a <<= 1;
-            // 2. 然后与约简多项式异或
             a ^= reducing_poly;
         } else {
-            // 如果不是，直接左移即可
             a <<= 1;
         }
+        a &= mask;
     }
 
-    return r;
+    return (r & mask);
 }
 
 void gf_init(void) {
@@ -74,6 +63,7 @@ void gf_init(void) {
         gf_antilog[i] = p;
         gf_log[p] = (gf_elem_t)i;
         p = gf_mul_for_init(p, generator);
+        p &= (1u << MCELIECE_M) - 1u;
     }
 
     gf_log[0] = 0;
@@ -106,9 +96,15 @@ gf_elem_t gf_inv(gf_elem_t a) {
     if (a == 0) {
         return 0;
     }
-    // 确保 log[a] 在范围内，避免负数索引
-    if (gf_log[a] == 0 && a != 1) return 0; // 处理未初始化或无效情况
-    return gf_antilog[(MCELIECE_Q - 1) - gf_log[a]];
+    if (a == 1) {
+        return 1;
+    }
+    int log_a = gf_log[a];
+    if (log_a < 0 || log_a >= (MCELIECE_Q - 1)) {
+        return 0;
+    }
+    int idx = (MCELIECE_Q - 1 - log_a) % (MCELIECE_Q - 1);
+    return gf_antilog[idx];
 }
 
 // GF(2^13)除法
@@ -417,12 +413,23 @@ void matrix_fq_free(matrix_fq_t *mat) {
 //   最终修正版：solve_linear_system
 // =======================================================
 gf_elem_t* solve_linear_system(const matrix_fq_t *A, const gf_elem_t *b) {
+    printf("      -> solve_linear_system: enter n=%d\n", A->rows);
     int n = A->rows;
     if (n != A->cols) return NULL; // 只支持方阵
 
     // 1. 创建增广矩阵 [A | b]
     matrix_fq_t *aug = matrix_fq_create(n, n + 1);
-    if (!aug) return NULL;
+    if (!aug) { printf("      -> solve_linear_system: aug alloc failed\n"); return NULL; }
+
+    printf("      -> A dims: %dx%d, A->data=%p, b=%p, aug->data=%p (size=%zu)\n", A->rows, A->cols, (void*)A->data, (void*)b, (void*)aug->data, (size_t)(n*(n+1))*sizeof(gf_elem_t));
+    // sample print
+    for (int si = 0; si < (n<3?n:3); si++) {
+        printf("      -> A[%d,*]:", si);
+        for (int sj = 0; sj < (n<6?n:6); sj++) {
+            printf(" %u", (unsigned)A->data[si*n+sj]);
+        }
+        printf(" | b[%d]=%u\n", si, (unsigned)b[si]);
+    }
 
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
@@ -432,7 +439,9 @@ gf_elem_t* solve_linear_system(const matrix_fq_t *A, const gf_elem_t *b) {
     }
 
     // 2. 高斯-若尔当消元
+    printf("      -> starting elimination...\n");
     for (int i = 0; i < n; i++) {
+        printf("      -> column %d pivot search...\n", i);
         // --- 寻找主元 (在第 i 列，从第 i 行开始) ---
         int pivot_row = i;
         while (pivot_row < n && aug->data[pivot_row * (n + 1) + i] == 0) {
@@ -440,10 +449,12 @@ gf_elem_t* solve_linear_system(const matrix_fq_t *A, const gf_elem_t *b) {
         }
 
         if (pivot_row == n) { // 在当前列找不到主元，矩阵奇异
+            printf("      -> solve_linear_system: singular at col %d\n", i);
             matrix_fq_free(aug);
             return NULL; // 无唯一解
         }
 
+        printf("      -> pivot at row %d (val=%u). swapping if needed...\n", pivot_row, (unsigned)aug->data[pivot_row * (n + 1) + i]);
         // --- 交换行，把主元行换到第 i 行 ---
         if (pivot_row != i) {
             for (int k = 0; k < n + 1; k++) {
@@ -456,7 +467,9 @@ gf_elem_t* solve_linear_system(const matrix_fq_t *A, const gf_elem_t *b) {
         // --- 将主元归一化为 1 (通过乘以其逆元) ---
         // 对整行 (从第 i 列开始即可，因为左边都是0) 进行操作
         gf_elem_t pivot_val = aug->data[i * (n + 1) + i];
+        if (pivot_val == 0) { printf("      -> pivot zero at row %d (should not happen after search)\n", i); matrix_fq_free(aug); return NULL; }
         gf_elem_t pivot_inv = gf_inv(pivot_val);
+        if (pivot_inv == 0) { printf("      -> pivot has no inverse at row %d (val=%u)\n", i, pivot_val); matrix_fq_free(aug); return NULL; }
         for (int k = i; k < n + 1; k++) {
             aug->data[i * (n + 1) + k] = gf_mul(aug->data[i * (n + 1) + k], pivot_inv);
         }
@@ -488,6 +501,7 @@ gf_elem_t* solve_linear_system(const matrix_fq_t *A, const gf_elem_t *b) {
     }
 
     matrix_fq_free(aug);
+    printf("      -> solve_linear_system: success, returning solution.\n");
     return solution;
 }
 
