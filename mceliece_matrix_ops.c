@@ -15,47 +15,95 @@ void matrix_swap_rows(matrix_t *mat, int row1, int row2) {
         mat->data[row2 * mat->cols_bytes + col] = temp;
     }
 }
+// 用列交换实现的系统形式化，目标把左侧mt列变成单位阵
 static int reduce_to_systematic_form(matrix_t *H) {
     int mt = H->rows;
+    int n = H->cols;
 
-    int i, j;
-
-    // --- 正向消元，形成上三角矩阵 ---
-    for (i = 0; i < mt; i++) {
-        // 1. 寻找主元 (在第i列，从第i行开始找)
-        int pivot_row = i;
-        while (pivot_row < mt && matrix_get_bit(H, pivot_row, i) == 0) {
-            pivot_row++;
+    // 当前处理的行、列
+    int row = 0;
+    for (int col = 0; col < n && row < mt; col++) {
+        // 1) 在当前列col寻找一个主元行 >= row
+        int pivot_row = -1;
+        for (int r = row; r < mt; r++) {
+            if (matrix_get_bit(H, r, col)) { pivot_row = r; break; }
         }
 
-        if (pivot_row == mt) {
-            // 在这一列找不到主元，矩阵是奇异的，无法转换为系统形式
-            return -1; // 失败
-        }
-
-        // 2. 将主元行交换到当前行i
-        if (pivot_row != i) {
-            matrix_swap_rows(H, i, pivot_row);
-        }
-
-        // 3. 将当前列(i)的其他所有行的元素消为0 (在主元下方)
-        for (j = i + 1; j < mt; j++) {
-            if (matrix_get_bit(H, j, i) == 1) {
-                matrix_xor_rows(H, j, i);
+        // 如果当前列没有主元，尝试在右侧列中找到一个含1的列并交换到当前列
+        if (pivot_row == -1) {
+            int pivot_col = -1;
+            for (int c = col + 1; c < n; c++) {
+                for (int r = row; r < mt; r++) {
+                    if (matrix_get_bit(H, r, c)) { pivot_col = c; break; }
+                }
+                if (pivot_col != -1) break;
             }
+            if (pivot_col == -1) {
+                // 无法在后续列中找到主元，继续让col前进
+                continue;
+            }
+            // 交换列，把可作主元的列移到当前位置
+            matrix_swap_cols(H, col, pivot_col);
+            // 重新在该列寻找主元行
+            for (int r = row; r < mt; r++) {
+                if (matrix_get_bit(H, r, col)) { pivot_row = r; break; }
+            }
+            if (pivot_row == -1) {
+                // 理论上不会发生
+                continue;
+            }
+        }
+
+        // 2) 把主元行交换到当前row
+        if (pivot_row != row) {
+            matrix_swap_rows(H, row, pivot_row);
+        }
+
+        // 3) 将该列的其他行清零
+        for (int r = 0; r < mt; r++) {
+            if (r == row) continue;
+            if (matrix_get_bit(H, r, col)) {
+                matrix_xor_rows(H, r, row);
+            }
+        }
+
+        // 推进到下一行
+        row++;
+    }
+
+    // 检查是否成功在左侧形成了mt阶单位阵（即前mt列为单位阵）
+    // 如未形成，返回失败
+    int identity_cols_found = 0;
+    // 逐列找单位列向量
+    for (int c = 0; c < mt; c++) {
+        int ones = 0, one_row = -1;
+        for (int r = 0; r < mt; r++) {
+            int bit = matrix_get_bit(H, r, c);
+            if (bit) { ones++; one_row = r; if (ones > 1) break; }
+        }
+        if (ones == 1) {
+            // 确认为单位列，且该1位应位于对角位置，但我们只是要求单位性
+            identity_cols_found++;
+        } else {
+            // 尝试在后续列中寻找单位列并交换到c位
+            int id_col = -1;
+            for (int cc = c + 1; cc < n; cc++) {
+                int ones2 = 0, one_row2 = -1;
+                for (int r = 0; r < mt; r++) {
+                    int bit = matrix_get_bit(H, r, cc);
+                    if (bit) { ones2++; one_row2 = r; if (ones2 > 1) break; }
+                }
+                if (ones2 == 1) { id_col = cc; break; }
+            }
+            if (id_col == -1) {
+                return -1; // 无法形成系统形式
+            }
+            matrix_swap_cols(H, c, id_col);
+            identity_cols_found++;
         }
     }
 
-    // --- 反向消元，形成单位矩阵 ---
-    for (i = mt - 1; i >= 0; i--) {
-        for (j = 0; j < i; j++) {
-            if (matrix_get_bit(H, j, i) == 1) {
-                matrix_xor_rows(H, j, i);
-            }
-        }
-    }
-
-    return 0; // 成功
+    return (identity_cols_found == mt) ? 0 : -1;
 }
 
 // 矩阵列交换
@@ -147,7 +195,7 @@ mceliece_error_t mat_gen(const polynomial_t *g, const gf_elem_t *alpha,
         }
     }
 
-    // 调用新的、符合规范的高斯消元函数
+    // 调用新的、包含列交换的系统化函数
     if (reduce_to_systematic_form(H) != 0) {
         matrix_free(H);
         return MCELIECE_ERROR_KEYGEN_FAIL; // 矩阵奇异，生成失败

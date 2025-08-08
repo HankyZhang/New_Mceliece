@@ -2,6 +2,7 @@
 #include "gf.h"
 #include <stdio.h>
 #include <assert.h>
+#include <string.h>
 
 gf_elem_t *gf_log = NULL;
 gf_elem_t *gf_antilog = NULL;
@@ -20,95 +21,108 @@ static gf_elem_t gf_mul_for_init(gf_elem_t a, gf_elem_t b) {
 
     // 我们将循环 m 次 (m=13)
     for (int i = 0; i < MCELIECE_M; i++) {
-        // 如果 b 的当前最低位是 1
         if (b & 1) {
             r ^= a;
         }
-
-        // b 右移一位，准备处理下一位
         b >>= 1;
-
-        // a 左移一位 (相当于 a = a * x)
-        // 检查最高位 (x^12) 是否为 1
+        // a = a * x mod p(x)
         if (a & (1 << (MCELIECE_M - 1))) {
-            // 如果是，左移后会溢出，需要进行模约简
-            // 1. 先左移
-            a <<= 1;
-            // 2. 然后与约简多项式异或
-            a ^= reducing_poly;
+            a = (a << 1) ^ reducing_poly;
         } else {
-            // 如果不是，直接左移即可
             a <<= 1;
         }
+        a &= ((1 << MCELIECE_M) - 1);
     }
 
     return r;
 }
 
-void gf_init(void) {
-    // ----> 新增：在函数开头进行内存分配 <----
-    if (gf_log == NULL) { // 确保只分配一次
-        gf_log = malloc(MCELIECE_Q * sizeof(gf_elem_t));
-        if (gf_log == NULL) {
-            fprintf(stderr, "Failed to allocate memory for gf_log\n");
-            exit(1);
-        }
-    }
-    if (gf_antilog == NULL) {
-        gf_antilog = malloc(MCELIECE_Q * sizeof(gf_elem_t));
-        if (gf_antilog == NULL) {
-            fprintf(stderr, "Failed to allocate memory for gf_antilog\n");
-            exit(1);
-        }
-    }
+static void gf_build_tables_with_generator(gf_elem_t generator) {
+    memset(gf_log, 0, MCELIECE_Q * sizeof(gf_elem_t));
+    memset(gf_antilog, 0, MCELIECE_Q * sizeof(gf_elem_t));
 
-    // ----> 后续的初始化逻辑保持完全不变 <----
-    const gf_elem_t generator = 3;
     gf_elem_t p = 1;
-    int i;
-
-    assert(MCELIECE_M == 13);
-    assert(MCELIECE_Q == 8192);
-
-    for (i = 0; i < MCELIECE_Q - 1; i++) {
+    for (int i = 0; i < MCELIECE_Q - 1; i++) {
         gf_antilog[i] = p;
         gf_log[p] = (gf_elem_t)i;
         p = gf_mul_for_init(p, generator);
     }
-
+    gf_antilog[MCELIECE_Q - 1] = 1;
     gf_log[0] = 0;
+}
+
+static int gf_tables_cover_all(void) {
+    // Verify every non-zero element has a log entry
+    for (int a = 1; a < MCELIECE_Q; a++) {
+        if (gf_log[a] == 0 && a != 1) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+void gf_init(void) {
+    if (gf_log == NULL) {
+        gf_log = malloc(MCELIECE_Q * sizeof(gf_elem_t));
+        if (!gf_log) { fprintf(stderr, "Failed to allocate gf_log\n"); exit(1);} 
+    }
+    if (gf_antilog == NULL) {
+        gf_antilog = malloc(MCELIECE_Q * sizeof(gf_elem_t));
+        if (!gf_antilog) { fprintf(stderr, "Failed to allocate gf_antilog\n"); exit(1);} 
+    }
+
+    assert(MCELIECE_M == 13);
+    assert(MCELIECE_Q == 8192);
+
+    // Try generator x (2) first
+    gf_build_tables_with_generator(2);
+    if (!gf_tables_cover_all()) {
+        // Fallback: try generator 3
+        gf_build_tables_with_generator(3);
+    }
+    if (!gf_tables_cover_all()) {
+        // As a last resort, brute-force generate using cycle of x
+        gf_build_tables_with_generator(2);
+        // Even if not primitive, we will still keep tables and rely on fallbacks in mul/inv
+        fprintf(stderr, "Warning: GF tables not covering all elements; using fallbacks for missing entries.\n");
+    }
 
     printf("GF(2^13) tables initialized successfully on the heap.\n");
     fflush(stdout);
 }
+
 gf_elem_t gf_add(gf_elem_t a, gf_elem_t b) {
     return a ^ b;
 }
 
-// ----> 您为外部使用而定义的、高效的查表版本保持不变 <----
-
-// 新的、快速且正确的 GF(2^13) 乘法
+// 新的、快速且健壮的 GF(2^13) 乘法（有表则用表，否则回退到逐位算法）
 gf_elem_t gf_mul(gf_elem_t a, gf_elem_t b) {
-    if (a == 0 || b == 0) {
-        return 0;
+    if (a == 0 || b == 0) return 0;
+    gf_elem_t la = gf_log[a];
+    gf_elem_t lb = gf_log[b];
+    if ((la == 0 && a != 1) || (lb == 0 && b != 1)) {
+        // fallback safe multiply
+        return gf_mul_for_init(a, b);
     }
-    int log_a = gf_log[a];
-    int log_b = gf_log[b];
-    int sum_log = log_a + log_b;
-    if (sum_log >= MCELIECE_Q - 1) {
-        sum_log -= (MCELIECE_Q - 1);
-    }
+    int sum_log = la + lb;
+    if (sum_log >= MCELIECE_Q - 1) sum_log -= (MCELIECE_Q - 1);
     return gf_antilog[sum_log];
 }
 
-// 新的、快速且正确的 GF(2^13) 求逆
+// 新的、快速且健壮的 GF(2^13) 求逆（有表则用表，否则回退暴力求逆）
 gf_elem_t gf_inv(gf_elem_t a) {
-    if (a == 0) {
-        return 0;
+    if (a == 0) return 0;
+    gf_elem_t la = gf_log[a];
+    if (la != 0 || a == 1) {
+        return gf_antilog[(MCELIECE_Q - 1) - la];
     }
-    // 确保 log[a] 在范围内，避免负数索引
-    if (gf_log[a] == 0 && a != 1) return 0; // 处理未初始化或无效情况
-    return gf_antilog[(MCELIECE_Q - 1) - gf_log[a]];
+    // Fallback: brute-force find b s.t. a*b == 1
+    for (int b = 1; b < MCELIECE_Q; b++) {
+        if (gf_mul_for_init(a, (gf_elem_t)b) == 1) {
+            return (gf_elem_t)b;
+        }
+    }
+    return 0; // should not happen
 }
 
 // GF(2^13)除法
@@ -172,10 +186,7 @@ gf_elem_t polynomial_eval(const polynomial_t *poly, gf_elem_t x) {
         return 0; // 零多项式
     }
 
-    // 从最高次项系数开始
     gf_elem_t result = poly->coeffs[poly->degree];
-
-    // 向下迭代到常数项
     for (int i = poly->degree - 1; i >= 0; i--) {
         result = gf_mul(result, x);
         result = gf_add(result, poly->coeffs[i]);
@@ -438,8 +449,10 @@ gf_elem_t* solve_linear_system(const matrix_fq_t *A, const gf_elem_t *b) {
         while (pivot_row < n && aug->data[pivot_row * (n + 1) + i] == 0) {
             pivot_row++;
         }
+        printf("      [SLS] i=%d pivot_row=%d\n", i, pivot_row);
 
         if (pivot_row == n) { // 在当前列找不到主元，矩阵奇异
+            printf("      [SLS] singular at col=%d\n", i);
             matrix_fq_free(aug);
             return NULL; // 无唯一解
         }
@@ -456,7 +469,17 @@ gf_elem_t* solve_linear_system(const matrix_fq_t *A, const gf_elem_t *b) {
         // --- 将主元归一化为 1 (通过乘以其逆元) ---
         // 对整行 (从第 i 列开始即可，因为左边都是0) 进行操作
         gf_elem_t pivot_val = aug->data[i * (n + 1) + i];
+        if (pivot_val == 0) {
+            printf("      [SLS] zero pivot at i=%d\n", i);
+            matrix_fq_free(aug);
+            return NULL;
+        }
         gf_elem_t pivot_inv = gf_inv(pivot_val);
+        if (pivot_inv == 0) { // 仅当表损坏或未初始化时发生
+            printf("      [SLS] pivot_inv==0 at i=%d, pivot_val=%u\n", i, pivot_val);
+            matrix_fq_free(aug);
+            return NULL;
+        }
         for (int k = i; k < n + 1; k++) {
             aug->data[i * (n + 1) + k] = gf_mul(aug->data[i * (n + 1) + k], pivot_inv);
         }

@@ -179,6 +179,8 @@ mceliece_error_t generate_irreducible_poly_final(polynomial_t *g, const uint8_t 
     int m = MCELIECE_M;
     mceliece_error_t ret = MCELIECE_SUCCESS;
 
+    printf("    -> generate_irreducible_poly: enter (t=%d, m=%d)\n", t, m);
+
     // --- 准备工作 ---
     polynomial_t *F_y = polynomial_create(t);
     polynomial_t *beta_poly = polynomial_create(t - 1);
@@ -190,11 +192,13 @@ mceliece_error_t generate_irreducible_poly_final(polynomial_t *g, const uint8_t 
     gf_elem_t *solution = NULL;
 
     if (!F_y || !beta_poly || !A || !b || !last_power || !temp_power || !temp_mod) {
+        printf("    -> alloc failure: F=%p beta=%p A=%p b=%p last=%p mul=%p mod=%p\n", (void*)F_y, (void*)beta_poly, (void*)A, (void*)b, (void*)last_power, (void*)temp_power, (void*)temp_mod);
         ret = MCELIECE_ERROR_MEMORY;
         goto cleanup;
     }
 
     get_field_poly_F(F_y);
+    printf("    -> F(y) degree=%d (expect %d)\n", F_y->degree, t);
 
     // --- 1. 构造 beta 多项式 ---
     for (int j = 0; j < t; j++) {
@@ -203,6 +207,7 @@ mceliece_error_t generate_irreducible_poly_final(polynomial_t *g, const uint8_t 
         beta_j &= (1 << m) - 1;
         polynomial_set_coeff(beta_poly, j, beta_j);
     }
+    printf("    -> beta built: deg=%d\n", beta_poly->degree);
 
     // --- 2. 构造矩阵 A 和向量 b ---
     polynomial_set_coeff(last_power, 0, 1); // beta^0 = 1
@@ -211,6 +216,10 @@ mceliece_error_t generate_irreducible_poly_final(polynomial_t *g, const uint8_t 
     }
 
     for (int k = 1; k <= t; k++) {
+        // 进度日志
+        if ((k % 16) == 0 || k == 1 || k == t) {
+            printf("    -> k=%d\n", k);
+        }
         polynomial_mul(temp_power, last_power, beta_poly);
         polynomial_div(NULL, temp_mod, temp_power, F_y);
 
@@ -227,9 +236,11 @@ mceliece_error_t generate_irreducible_poly_final(polynomial_t *g, const uint8_t 
     }
 
     // --- 3. 求解线性方程组 ---
+    printf("    -> solving linear system\n");
     solution = solve_linear_system(A, b);
 
     if (!solution) {
+        printf("    -> solve_linear_system returned NULL\n");
         ret = MCELIECE_ERROR_KEYGEN_FAIL;
         goto cleanup;
     }
@@ -241,6 +252,7 @@ mceliece_error_t generate_irreducible_poly_final(polynomial_t *g, const uint8_t 
     polynomial_set_coeff(g, t, 1);
 
     if (g->degree != t) {
+        printf("    -> g degree not t: %d\n", g->degree);
         ret = MCELIECE_ERROR_KEYGEN_FAIL;
         goto cleanup;
     }
