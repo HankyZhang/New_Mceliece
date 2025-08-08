@@ -147,6 +147,7 @@ mceliece_error_t seeded_key_gen(const uint8_t *delta, public_key_t *pk, private_
 
         // 5. 生成 Goppa 多项式 g
         printf("  Step 2: Generating irreducible polynomial (g)...\n");
+        printf("    -> sk->g.coeffs=%p max_degree=%d degree=%d\n", (void*)sk->g.coeffs, sk->g.max_degree, sk->g.degree);
         if (generate_irreducible_poly_final(&sk->g, irreducible_poly_bits_ptr) != MCELIECE_SUCCESS) {
             // 注意：因为我们的实现是“猜测-检验”，所以这里失败是大概率事件。
             // 只有当您换成真正的最小多项式算法后，这里才会稳定成功。
@@ -214,8 +215,8 @@ mceliece_error_t mceliece_keygen(public_key_t *pk, private_key_t *sk) {
 
     // 生成一个一次性的随机种子 delta
     uint8_t delta[MCELIECE_L_BYTES];
-    // 我们需要一个安全的随机源，但为了编译通过，暂时使用 mceliece_prg
-    mceliece_prg((const uint8_t*)"a_seed_for_the_seed_generator", delta, 32);
+    // 使用随机字节填充种子（长度正好为32字节）
+    random_bytes(delta, MCELIECE_L_BYTES);
 
     return seeded_key_gen(delta, pk, sk);
 }

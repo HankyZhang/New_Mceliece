@@ -1,5 +1,6 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -O2 -std=c99 -g
+CFLAGS = -Wall -Wextra -O2 -std=c99 -g -fsanitize=address -fno-omit-frame-pointer
+LDFLAGS = -fsanitize=address
 TARGET = mceliece
 SOURCES = main.c mceliece_utils.c mceliece_gf.c mceliece_shake.c \
           mceliece_random.c mceliece_matrix_ops.c mceliece_berlekamp.c mceliece_kem.c
@@ -10,7 +11,7 @@ HEADERS = mceliece_types.h
 all: $(TARGET)
 
 $(TARGET): $(OBJECTS)
-	$(CC) $(OBJECTS) -o $(TARGET) -lm
+	$(CC) $(OBJECTS) -o $(TARGET) -lm $(LDFLAGS)
 
 %.o: %.c $(HEADERS)
 	$(CC) $(CFLAGS) -c $< -o $@
