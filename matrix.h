@@ -22,6 +22,7 @@ void matrix_xor_rows(matrix_t *mat, int row_dst, int row_src);
 // 高斯消元与系统形式检查
 mceliece_error_t matrix_rref(matrix_t *mat, int *pivot_cols, int *rank);
 int matrix_is_systematic(const matrix_t *mat);
+int reduce_to_systematic_form(matrix_t *H);
 mceliece_error_t matrix_to_systematic(matrix_t *mat, int *p, matrix_t *T_out);
 // 打印与拷贝
 void print_matrix(const char *label, const matrix_t *mat);

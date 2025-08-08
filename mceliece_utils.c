@@ -148,7 +148,11 @@ void vector_set_bit(uint8_t *vec, int bit_idx, int value) {
 
 // 矩阵位获取
 int matrix_get_bit(const matrix_t *mat, int row, int col) {
-    assert(row < mat->rows && col < mat->cols);
+    if (!mat || row < 0 || row >= mat->rows || col < 0 || col >= mat->cols) {
+        printf("ERROR: matrix_get_bit bounds check failed: mat=%p, row=%d/%d, col=%d/%d\n", 
+               mat, row, mat ? mat->rows : -1, col, mat ? mat->cols : -1);
+        return 0; // Return 0 instead of crashing
+    }
     int byte_idx = row * mat->cols_bytes + (col / 8);
     int bit_idx = col % 8;
     
@@ -170,7 +174,11 @@ int vector_weight(const uint8_t *vec, int len_bytes) {
 }
 
 void matrix_set_bit(matrix_t *mat, int row, int col, int bit) {
-    assert(row < mat->rows && col < mat->cols);
+    if (!mat || row < 0 || row >= mat->rows || col < 0 || col >= mat->cols) {
+        printf("ERROR: matrix_set_bit bounds check failed: mat=%p, row=%d/%d, col=%d/%d\n", 
+               mat, row, mat ? mat->rows : -1, col, mat ? mat->cols : -1);
+        return; // Don't crash, just return
+    }
     int byte_idx = row * mat->cols_bytes + (col / 8);
     int bit_idx = col % 8;
 

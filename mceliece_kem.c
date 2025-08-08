@@ -14,50 +14,68 @@ extern void mceliece_hash(uint8_t prefix, const uint8_t *input, size_t input_len
 mceliece_error_t fixed_weight_vector(uint8_t *e, int n, int t) {
     memset(e, 0, (n + 7) / 8);
 
-    // 1. 创建一个包含 t 个随机位置的数组
-    int *positions = malloc(t * sizeof(int));
-    if (!positions) return MCELIECE_ERROR_MEMORY;
-
-
-    // 1. 定义缓冲区大小
-    size_t random_bytes_len = t * 4;
+    // 根据规范 2.1 FixedWeight() 算法
+    // 1. 生成 σ₁τ 个随机比特，其中 τ ≥ t
+    int tau = t + 10; // 确保 τ ≥ t，增加一些余量
+    size_t random_bytes_len = tau * 2; // σ₁ = 16 bits = 2 bytes per position
     uint8_t *random_bytes = malloc(random_bytes_len);
-    if (!random_bytes) { free(positions); return MCELIECE_ERROR_MEMORY; }
-
+    if (!random_bytes) return MCELIECE_ERROR_MEMORY;
 
     mceliece_prg((const uint8_t*)"a_seed_for_fixed_weight_vector", random_bytes, random_bytes_len);
-    int random_idx = 0;
 
-    for (int i = 0; i < t; i++) {
-        int pos;
-        int is_unique;
-        do {
-            // 从随机字节流中生成一个范围在 [0, n-1] 内的随机位置
-            uint32_t rand_val = (uint32_t)random_bytes[random_idx]         |
-                              ((uint32_t)random_bytes[random_idx + 1] << 8)  |
-                              ((uint32_t)random_bytes[random_idx + 2] << 16) |
-                              ((uint32_t)random_bytes[random_idx + 3] << 24);
-            random_idx = (random_idx + 4) % (t * 4 - 4); // 循环使用随机字节
-            pos = rand_val % n;
+    // 2. 为每个 j ∈ {0, 1, ..., τ-1}，定义 d_j
+    int *d_values = malloc(tau * sizeof(int));
+    if (!d_values) { free(random_bytes); return MCELIECE_ERROR_MEMORY; }
 
-            // 检查该位置是否已经存在
-            is_unique = 1;
-            for (int j = 0; j < i; j++) {
-                if (positions[j] == pos) {
-                    is_unique = 0;
-                    break;
-                }
-            }
-        } while (!is_unique);
-        positions[i] = pos;
+    for (int j = 0; j < tau; j++) {
+        // 取 σ₁ 比特块的前 m 位作为整数
+        uint16_t d_j = (uint16_t)random_bytes[j * 2] |
+                      ((uint16_t)random_bytes[j * 2 + 1] << 8);
+        d_values[j] = d_j % n; // 范围在 {0, 1, ..., n-1}
     }
 
-    // 2. 在这些位置上将向量 e 的比特位置为 1
+    // 3. 定义 a_0, a_1, ..., a_{t-1} 为从 d_0, d_1, ..., d_{τ-1} 中选择的前 t 个唯一条目
+    int *positions = malloc(t * sizeof(int));
+    if (!positions) { free(random_bytes); free(d_values); return MCELIECE_ERROR_MEMORY; }
+
+    int unique_count = 0;
+    int max_attempts = tau * 2; // 防止无限循环
+    int attempts = 0;
+
+    for (int i = 0; i < tau && unique_count < t && attempts < max_attempts; i++) {
+        int pos = d_values[i];
+        int is_unique = 1;
+
+        // 检查该位置是否已经存在
+        for (int j = 0; j < unique_count; j++) {
+            if (positions[j] == pos) {
+                is_unique = 0;
+                break;
+            }
+        }
+
+        if (is_unique) {
+            positions[unique_count] = pos;
+            unique_count++;
+        }
+        attempts++;
+    }
+
+    // 如果找不到足够的唯一位置，重新生成
+    if (unique_count < t) {
+        free(positions);
+        free(d_values);
+        free(random_bytes);
+        return MCELIECE_ERROR_KEYGEN_FAIL; // 重新尝试
+    }
+
+    // 4. 在这些位置上将向量 e 的比特位置为 1
     for (int i = 0; i < t; i++) {
         vector_set_bit(e, positions[i], 1);
     }
 
     free(positions);
+    free(d_values);
     free(random_bytes);
     return MCELIECE_SUCCESS;
 }
@@ -228,37 +246,46 @@ mceliece_error_t mceliece_encap(const public_key_t *pk, uint8_t *ciphertext, uin
         return MCELIECE_ERROR_INVALID_PARAM;
     }
     
-    // 步骤1：生成固定权重向量e
-    uint8_t *e = malloc(MCELIECE_N_BYTES);
-    if (!e) return MCELIECE_ERROR_MEMORY;
-    
-    mceliece_error_t ret = fixed_weight_vector(e, MCELIECE_N, MCELIECE_T);
-    if (ret != MCELIECE_SUCCESS) {
+    int max_attempts = 10;
+    for (int attempt = 0; attempt < max_attempts; attempt++) {
+        // 步骤1：生成固定权重向量e
+        uint8_t *e = malloc(MCELIECE_N_BYTES);
+        if (!e) return MCELIECE_ERROR_MEMORY;
+        
+        mceliece_error_t ret = fixed_weight_vector(e, MCELIECE_N, MCELIECE_T);
+        if (ret != MCELIECE_SUCCESS) {
+            free(e);
+            if (ret == MCELIECE_ERROR_KEYGEN_FAIL) {
+                // 重新尝试
+                continue;
+            }
+            return ret;
+        }
+        
+        // 步骤2：计算C = Encode(e, T)
+        encode_vector(e, &pk->T, ciphertext);
+        
+        // 步骤3：计算K = Hash(1, e, C)
+        // 构造hash输入：前缀1 + e + C
+        size_t hash_input_len = 1 + MCELIECE_N_BYTES + MCELIECE_MT_BYTES;
+        uint8_t *hash_input = malloc(hash_input_len);
+        if (!hash_input) {
+            free(e);
+            return MCELIECE_ERROR_MEMORY;
+        }
+        
+        hash_input[0] = 1;  // 前缀
+        memcpy(hash_input + 1, e, MCELIECE_N_BYTES);
+        memcpy(hash_input + 1 + MCELIECE_N_BYTES, ciphertext, MCELIECE_MT_BYTES);
+        
+        mceliece_hash(0, hash_input, hash_input_len, session_key);
+        
         free(e);
-        return ret;
+        free(hash_input);
+        return MCELIECE_SUCCESS;
     }
     
-    // 步骤2：计算C = Encode(e, T)
-    encode_vector(e, &pk->T, ciphertext);
-    
-    // 步骤3：计算K = Hash(1, e, C)
-    // 构造hash输入：前缀1 + e + C
-    size_t hash_input_len = 1 + MCELIECE_N_BYTES + MCELIECE_MT_BYTES;
-    uint8_t *hash_input = malloc(hash_input_len);
-    if (!hash_input) {
-        free(e);
-        return MCELIECE_ERROR_MEMORY;
-    }
-    
-    hash_input[0] = 1;  // 前缀
-    memcpy(hash_input + 1, e, MCELIECE_N_BYTES);
-    memcpy(hash_input + 1 + MCELIECE_N_BYTES, ciphertext, MCELIECE_MT_BYTES);
-    
-    mceliece_hash(0, hash_input, hash_input_len, session_key);
-    
-    free(e);
-    free(hash_input);
-    return MCELIECE_SUCCESS;
+    return MCELIECE_ERROR_KEYGEN_FAIL; // 达到最大尝试次数
 }
 
 // Decode算法的简化版本

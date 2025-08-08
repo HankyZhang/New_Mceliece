@@ -92,13 +92,38 @@ gf_elem_t gf_mul(gf_elem_t a, gf_elem_t b) {
     if (a == 0 || b == 0) {
         return 0;
     }
+    
+    // 添加调试信息
+    if (a == 1 && b == 1) {
+        printf("    -> gf_mul: Testing 1 * 1\n");
+        printf("    -> gf_mul: gf_log[1] = %d, gf_antilog[0] = %04x\n", gf_log[1], gf_antilog[0]);
+    }
+    
+    // 添加调试信息 for the problematic case
+    if (a == 1 && b == 0x1406) {
+        printf("    -> gf_mul: Testing 1 * 0x1406\n");
+        printf("    -> gf_mul: gf_log[1] = %d, gf_log[0x1406] = %d\n", gf_log[1], gf_log[0x1406]);
+    }
+    
     int log_a = gf_log[a];
     int log_b = gf_log[b];
     int sum_log = log_a + log_b;
     if (sum_log >= MCELIECE_Q - 1) {
         sum_log -= (MCELIECE_Q - 1);
     }
-    return gf_antilog[sum_log];
+    gf_elem_t result = gf_antilog[sum_log];
+    
+    // 添加调试信息
+    if (a == 1 && b == 1) {
+        printf("    -> gf_mul: log_a=%d, log_b=%d, sum_log=%d, result=%04x\n", log_a, log_b, sum_log, result);
+    }
+    
+    // 添加调试信息 for the problematic case
+    if (a == 1 && b == 0x1406) {
+        printf("    -> gf_mul: log_a=%d, log_b=%d, sum_log=%d, result=%04x\n", log_a, log_b, sum_log, result);
+    }
+    
+    return result;
 }
 
 // 新的、快速且正确的 GF(2^13) 求逆
@@ -172,15 +197,27 @@ gf_elem_t polynomial_eval(const polynomial_t *poly, gf_elem_t x) {
         return 0; // 零多项式
     }
 
+    printf("    -> polynomial_eval: Evaluating polynomial of degree %d at x=%04x\n", poly->degree, x);
+    printf("    -> polynomial_eval: Coefficients: ");
+    for (int i = 0; i <= poly->degree; i++) {
+        printf("%04x ", poly->coeffs[i]);
+    }
+    printf("\n");
+
     // 从最高次项系数开始
     gf_elem_t result = poly->coeffs[poly->degree];
+    printf("    -> polynomial_eval: Starting with result = %04x (coefficient of x^%d)\n", result, poly->degree);
 
     // 向下迭代到常数项
     for (int i = poly->degree - 1; i >= 0; i--) {
+        printf("    -> polynomial_eval: Step %d: result = %04x, coeff[%d] = %04x\n", poly->degree - i, result, i, poly->coeffs[i]);
         result = gf_mul(result, x);
+        printf("    -> polynomial_eval: After gf_mul(result, x): result = %04x\n", result);
         result = gf_add(result, poly->coeffs[i]);
+        printf("    -> polynomial_eval: After gf_add(result, coeff[%d]): result = %04x\n", i, result);
     }
 
+    printf("    -> polynomial_eval: Final result = %04x\n", result);
     return result;
 }
 

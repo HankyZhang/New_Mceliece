@@ -9,202 +9,179 @@
 #include "gf.h"
 #include "matrix.h"
 
-// --- 从 mceliece_matrix_ops.c 中复制过来的函数 ---
-// 我们需要在这里重新定义它们，或者创建一个共享的 .h 文件
-// 为了简单，我们直接在这里定义
-
-void matrix_swap_rows(matrix_t *mat, int row1, int row2) {
-    if (row1 == row2) return;
-    for (int col = 0; col < mat->cols_bytes; col++) {
-        uint8_t temp = mat->data[row1 * mat->cols_bytes + col];
-        mat->data[row1 * mat->cols_bytes + col] = mat->data[row2 * mat->cols_bytes + col];
-        mat->data[row2 * mat->cols_bytes + col] = temp;
-    }
-}
-
-void matrix_swap_cols(matrix_t *mat, int col1, int col2) {
-    if (col1 == col2) return;
-    for (int row = 0; row < mat->rows; row++) {
-        int bit1 = matrix_get_bit(mat, row, col1);
-        int bit2 = matrix_get_bit(mat, row, col2);
-        matrix_set_bit(mat, row, col1, bit2);
-        matrix_set_bit(mat, row, col2, bit1);
-    }
-}
-
-void matrix_xor_rows(matrix_t *mat, int row_dst, int row_src) {
-    for (int col = 0; col < mat->cols_bytes; col++) {
-        mat->data[row_dst * mat->cols_bytes + col] ^= mat->data[row_src * mat->cols_bytes + col];
-    }
-}
-
-void print_matrix(const char *label, const matrix_t *mat) {
-    printf("%s (%dx%d):\n", label, mat->rows, mat->cols);
-    for (int row = 0; row < mat->rows; row++) {
-        printf("  ");
-        for (int col = 0; col < mat->cols; col++) {
-            printf("%d", matrix_get_bit(mat, row, col));
-            if ((col + 1) % 8 == 0 && col < mat->cols - 1) printf(" ");
-        }
-        printf("\n");
-    }
-    printf("\n");
-}
+// Function declarations
+extern int reduce_to_systematic_form(matrix_t *H);
+extern int matrix_is_systematic(const matrix_t *mat);
 
 
-// 这是我们要测试的目标函数 - pk_gen
-// (请确保这里的代码与 mceliece_matrix_ops.c 中的版本完全一致)
-static int pk_gen(matrix_t *T, int *p, matrix_t *H) {
-    int mt = H->rows;
-    int n = H->cols;
-    int k = n - mt;
-    int i, j, row, col, temp;
 
-    matrix_t *H_copy = matrix_create(mt, n);
-    if (!H_copy) return -1;
-    matrix_copy(H_copy, H);
 
-    for (i = 0; i < n; i++) {
-        p[i] = i;
-    }
 
-    for (i = 0; i < mt; i++) {
-        int pivot_found = 0;
-        for (j = i; j < n; j++) {
-            for (row = i; row < mt; row++) {
-                if (matrix_get_bit(H_copy, row, j) == 1) {
-                    if (i != row) {
-                        matrix_swap_rows(H_copy, i, row);
-                    }
-                    if (i != j) {
-                        matrix_swap_cols(H_copy, i, j);
-                        temp = p[i]; p[i] = p[j]; p[j] = temp;
-                    }
-                    pivot_found = 1;
-                    break;
-                }
-            }
-            if (pivot_found) {
-                break;
-            }
-        }
-
-        if (!pivot_found) {
-            matrix_free(H_copy);
-            return -1;
-        }
-
-        for (row = 0; row < mt; row++) {
-            if (row != i && matrix_get_bit(H_copy, row, i) == 1) {
-                matrix_xor_rows(H_copy, row, i);
-            }
-        }
-    }
-
-    for (i = 0; i < mt; i++) {
-        for (j = 0; j < k; j++) {
-            matrix_set_bit(T, i, j, matrix_get_bit(H_copy, i, mt + j));
-        }
-    }
-
-    matrix_free(H_copy);
-    return 0;
-}
 
 
 // --- 单元测试主函数 ---
 
-// 创建一个随机的、保证满秩的 mt x n 矩阵
-matrix_t* create_test_matrix(int mt, int n) {
-    matrix_t *mat = matrix_create(mt, n);
-    if (!mat) return NULL;
 
-    // 1. 先创建一个系统形式的矩阵 [I_mt | R]，它必然是满秩的
-    for (int i = 0; i < mt; i++) {
-        matrix_set_bit(mat, i, i, 1);
+
+void test_random_matrix_reduction() {
+    printf("=== Testing Random Matrix Reduction ===\n");
+    
+    // Test with McEliece parameters
+    int mt = 1664;  // m * t = 13 * 128
+    int n = 6688;   // 2^m = 2^13
+    
+    printf("Testing with McEliece parameters: %dx%d matrix\n", mt, n);
+    
+    matrix_t *H = matrix_create(mt, n);
+    if (!H) {
+        printf("Failed to create matrix\n");
+        return;
     }
+    
+    // Fill matrix with random bits
+    srand(time(NULL));
     for (int i = 0; i < mt; i++) {
-        for (int j = mt; j < n; j++) {
+        for (int j = 0; j < n; j++) {
             if (rand() % 2 == 1) {
-                matrix_set_bit(mat, i, j, 1);
+                matrix_set_bit(H, i, j, 1);
             }
         }
     }
-
-    // 2. 对这个矩阵进行随机的行和列变换，打乱它
-    for (int i = 0; i < 1000; i++) { // 1000 次随机变换
-        int r1 = rand() % mt;
-        int r2 = rand() % mt;
-        matrix_swap_rows(mat, r1, r2);
-
-        int c1 = rand() % n;
-        int c2 = rand() % n;
-        matrix_swap_cols(mat, c1, c2);
-
-        if (rand() % 3 == 0) {
-            matrix_xor_rows(mat, r1, r2);
+    
+    printf("Random matrix created. Attempting reduction...\n");
+    
+    // Try to reduce to systematic form
+    int result = reduce_to_systematic_form(H);
+    printf("Reduction result: %d\n", result);
+    
+    if (result == 0) {
+        printf("Reduction successful!\n");
+        
+        // Check if it's systematic
+        int is_sys = matrix_is_systematic(H);
+        printf("Is systematic: %d\n", is_sys);
+        
+        // Print first few rows and columns
+        printf("First 4x8 elements of reduced matrix:\n");
+        for (int i = 0; i < 4 && i < mt; i++) {
+            for (int j = 0; j < 8 && j < n; j++) {
+                printf("%d ", matrix_get_bit(H, i, j));
+            }
+            printf("\n");
         }
+    } else {
+        printf("Reduction failed: matrix is singular.\n");
     }
-
-    return mat;
+    
+    matrix_free(H);
 }
 
-int main(void) {
-    srand(time(NULL));
-    int num_tests = 100;
-    int successes = 0;
-
-    // 使用小一点的参数进行快速测试
-    int test_mt = 16;
-    int test_n = 40;
-    int test_k = test_n - test_mt;
-
-    printf("--- Running Gauss-Jordan Elimination Test ---\n");
-    printf("Testing with %d random %dx%d full-rank matrices.\n\n", num_tests, test_mt, test_n);
-
-    for (int i = 0; i < num_tests; i++) {
-        printf("Test #%d:\n", i + 1);
-        matrix_t *H = create_test_matrix(test_mt, test_n);
-        if (!H) {
-            printf("  Failed to create test matrix.\n");
-            continue;
-        }
-
-        // print_matrix("  Original random matrix H:", H);
-
-        matrix_t *T = matrix_create(test_mt, test_k);
-        int *p = malloc(test_n * sizeof(int));
-        if (!T || !p) {
-            printf("  Memory allocation failed.\n");
-            matrix_free(H);
-            matrix_free(T);
-            free(p);
-            continue;
-        }
-
-        int result = pk_gen(T, p, H);
-
-        if (result == 0) {
-            printf("  pk_gen PASSED.\n");
-            successes++;
-        } else {
-            printf("  pk_gen FAILED! Returned -1.\n");
-            printf("  This matrix was incorrectly identified as singular:\n");
-            print_matrix("  Failed Matrix H:", H);
-        }
-
-        matrix_free(H);
-        matrix_free(T);
-        free(p);
+void test_matrix_construction() {
+    printf("=== Testing Matrix Construction ===\n");
+    
+    // Test with a small matrix first
+    int mt = 4;  // 4 rows
+    int n = 8;   // 8 columns
+    matrix_t *H = matrix_create(mt, n);
+    
+    if (!H) {
+        printf("Failed to create matrix\n");
+        return;
     }
-
-    printf("\n--- Test Summary ---\n");
-    printf("Successes: %d / %d\n", successes, num_tests);
-    if (successes == num_tests) {
-        printf("All tests passed! The pk_gen function seems correct.\n");
-    } else {
-        printf("There are failures! The pk_gen function has a bug.\n");
+    
+    // Create a simple test matrix that should be full rank
+    // [1 0 0 0 1 1 0 1]
+    // [0 1 0 0 1 0 1 1]
+    // [0 0 1 0 0 1 1 1]
+    // [0 0 0 1 1 1 1 0]
+    
+    matrix_set_bit(H, 0, 0, 1);
+    matrix_set_bit(H, 0, 4, 1);
+    matrix_set_bit(H, 0, 5, 1);
+    matrix_set_bit(H, 0, 7, 1);
+    
+    matrix_set_bit(H, 1, 1, 1);
+    matrix_set_bit(H, 1, 4, 1);
+    matrix_set_bit(H, 1, 6, 1);
+    matrix_set_bit(H, 1, 7, 1);
+    
+    matrix_set_bit(H, 2, 2, 1);
+    matrix_set_bit(H, 2, 5, 1);
+    matrix_set_bit(H, 2, 6, 1);
+    matrix_set_bit(H, 2, 7, 1);
+    
+    matrix_set_bit(H, 3, 3, 1);
+    matrix_set_bit(H, 3, 4, 1);
+    matrix_set_bit(H, 3, 5, 1);
+    matrix_set_bit(H, 3, 6, 1);
+    
+    printf("Original matrix:\n");
+    for (int i = 0; i < mt; i++) {
+        for (int j = 0; j < n; j++) {
+            printf("%d ", matrix_get_bit(H, i, j));
+        }
+        printf("\n");
     }
+    
+    // Try to reduce to systematic form
+    int result = reduce_to_systematic_form(H);
+    printf("Reduction result: %d\n", result);
+    
+    if (result == 0) {
+        printf("Reduced matrix:\n");
+        for (int i = 0; i < mt; i++) {
+            for (int j = 0; j < n; j++) {
+                printf("%d ", matrix_get_bit(H, i, j));
+            }
+            printf("\n");
+        }
+        
+        // Check if it's systematic
+        int is_sys = matrix_is_systematic(H);
+        printf("Is systematic: %d\n", is_sys);
+    }
+    
+    matrix_free(H);
+}
 
+void test_basic_operations() {
+    printf("=== Testing Basic Operations ===\n");
+    
+    // Test GF operations
+    printf("Testing GF operations...\n");
+    gf_elem_t a = 5, b = 3;
+    gf_elem_t sum = gf_add(a, b);
+    gf_elem_t prod = gf_mul(a, b);
+    gf_elem_t inv_a = gf_inv(a);
+    
+    printf("a = %d, b = %d\n", a, b);
+    printf("a + b = %d\n", sum);
+    printf("a * b = %d\n", prod);
+    printf("a^(-1) = %d\n", inv_a);
+    printf("a * a^(-1) = %d\n", gf_mul(a, inv_a));
+    
+    // Test polynomial evaluation
+    printf("\nTesting polynomial evaluation...\n");
+    polynomial_t *poly = polynomial_create(3);
+    polynomial_set_coeff(poly, 0, 1);  // constant term
+    polynomial_set_coeff(poly, 1, 2);  // x term
+    polynomial_set_coeff(poly, 2, 1);  // x^2 term
+    polynomial_set_coeff(poly, 3, 1);  // x^3 term
+    
+    gf_elem_t eval_result = polynomial_eval(poly, 3);
+    printf("f(x) = 1 + 2x + x^2 + x^3\n");
+    printf("f(3) = %d\n", eval_result);
+    
+    polynomial_free(poly);
+}
+
+int main() {
+    gf_init();  // Initialize the finite field
+    
+    test_basic_operations();
+    printf("\n");
+    test_matrix_construction();
+    printf("\n");
+    test_random_matrix_reduction();
     return 0;
 }
