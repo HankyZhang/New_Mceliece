@@ -278,7 +278,22 @@ mceliece_error_t decode_ciphertext(const uint8_t *ciphertext, const private_key_
 
     *success = 0;
 
-    // Step 1: Extend C to v = (C, 0, ..., 0)
+    // According to Classic McEliece spec, the ciphertext C = H*e where H = [I_mt | T]
+    // So C already IS the syndrome! We can directly pass it to Goppa decoding.
+    // 
+    // The "received" vector for syndrome computation should be the actual error pattern
+    // we're trying to recover, but since we don't know it yet, we use the syndrome directly.
+    
+    // Convert ciphertext bits to GF elements for syndrome computation
+    gf_elem_t syndrome[2 * MCELIECE_T];
+    memset(syndrome, 0, sizeof(syndrome));
+    
+    // In the Classic McEliece spec, we need to compute the syndrome from the received word
+    // But since C = H*e and we're looking for e, we can use C directly as syndrome information
+    // However, this needs to be converted to the proper Goppa syndrome format
+    
+    // For now, let's use a different approach: assume the received word is v = (C, 0, ..., 0)
+    // This represents what we would get if we received the first mt bits as C and the rest as 0
     uint8_t *v = malloc(MCELIECE_N_BYTES);
     if (!v) return MCELIECE_ERROR_MEMORY;
 

@@ -6,6 +6,7 @@
 #include "gf.h"
 // 外部函数声明
 extern void test_mceliece(void);
+extern void run_all_tests(void);
 extern mceliece_error_t mceliece_keygen(public_key_t *pk, private_key_t *sk);
 extern mceliece_error_t mceliece_encap(const public_key_t *pk, uint8_t *ciphertext, uint8_t *session_key);
 extern mceliece_error_t mceliece_decap(const uint8_t *ciphertext, const private_key_t *sk, uint8_t *session_key);
@@ -15,10 +16,11 @@ extern mceliece_error_t serialize_private_key(const private_key_t *sk, uint8_t *
 void print_usage(const char *prog_name) {
     printf("Usage: %s [command]\n", prog_name);
     printf("Commands:\n");
-    printf("  test    - Run basic functionality tests\n");
-    printf("  keygen  - Generate and display key pair\n");
-    printf("  demo    - Run complete encryption/decryption demo\n");
-    printf("  bench   - Run performance benchmark\n");
+    printf("  test      - Run basic functionality tests\n");
+    printf("  fulltest  - Run comprehensive test suite\n");
+    printf("  keygen    - Generate and display key pair\n");
+    printf("  demo      - Run complete encryption/decryption demo\n");
+    printf("  bench     - Run performance benchmark\n");
 }
 
 void print_parameters(void) {
@@ -296,6 +298,9 @@ int main(int argc, char *argv[]) {
 
     if (strcmp(command, "test") == 0) {
         test_mceliece();
+    }
+    else if (strcmp(command, "fulltest") == 0) {
+        run_all_tests();
     }
     else if (strcmp(command, "keygen") == 0) {
         demo_keygen();

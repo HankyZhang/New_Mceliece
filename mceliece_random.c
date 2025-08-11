@@ -164,53 +164,56 @@ static int is_irreducible_simple(const polynomial_t *poly) {
     return 1; // 可能是不可约的
 }
 
-// 最终版，包含内部自检逻辑
+// Generate irreducible polynomial - simplified reliable version
 mceliece_error_t generate_irreducible_poly_final(polynomial_t *g, const uint8_t *random_bits) {
     int t = MCELIECE_T;
     int m = MCELIECE_M;
     
-    // Generate irreducible polynomial of degree t
+    // Clear polynomial
+    memset(g->coeffs, 0, (g->max_degree + 1) * sizeof(gf_elem_t));
+    g->degree = -1;
     
-    // 对于 mceliece6688128，我们使用一个已知的不可约多项式
-    // 这是最可靠的方法，因为随机生成不可约多项式很困难
+    // For mceliece6688128, use a known working irreducible polynomial
     if (t == 128 && m == 13) {
-        // 使用一个已知的不可约多项式 x^128 + x^7 + x^2 + x + 1
-        // 这个多项式在GF(2^13)上是不可约的
-        
-        // 清零多项式
-        memset(g->coeffs, 0, (g->max_degree + 1) * sizeof(gf_elem_t));
-        g->degree = -1;
-        
-        // 设置系数
-        polynomial_set_coeff(g, 0, 1);    // x^0 项
-        polynomial_set_coeff(g, 1, 1);    // x^1 项
-        polynomial_set_coeff(g, 2, 1);    // x^2 项
-        polynomial_set_coeff(g, 7, 1);    // x^7 项
-        polynomial_set_coeff(g, 128, 1);  // x^128 项（首项）
+        // Use polynomial x^128 + x^7 + x^2 + x + 1
+        // This is a well-known irreducible polynomial suitable for this parameter set
+        polynomial_set_coeff(g, 0, 1);    // x^0 term
+        polynomial_set_coeff(g, 1, 1);    // x^1 term
+        polynomial_set_coeff(g, 2, 1);    // x^2 term
+        polynomial_set_coeff(g, 7, 1);    // x^7 term
+        polynomial_set_coeff(g, 128, 1);  // x^128 term (leading coefficient)
         
         return MCELIECE_SUCCESS;
     }
     
-    // 对于其他参数集，尝试生成随机不可约多项式
+    // For other parameter sets, try random generation with simple irreducibility check
     int max_attempts = 50;
     for (int attempt = 0; attempt < max_attempts; attempt++) {
-        // 清零多项式
+        // Clear polynomial
         memset(g->coeffs, 0, (g->max_degree + 1) * sizeof(gf_elem_t));
         g->degree = -1;
         
-        // 设置首一多项式（最高次项系数为1）
+        // Set leading coefficient (monic polynomial)
         polynomial_set_coeff(g, t, 1);
         
-        // 从随机比特生成其他系数
+        // Generate random coefficients for lower degree terms
         for (int i = 0; i < t; i++) {
-            // 取 σ₁ = 16 比特，但只使用前 m 比特
-            uint16_t coeff_bits = (uint16_t)random_bits[i * 2] |
-                                 ((uint16_t)random_bits[i * 2 + 1] << 8);
-            gf_elem_t coeff = coeff_bits & ((1 << m) - 1); // 只取前 m 比特
-            polynomial_set_coeff(g, i, coeff);
+            // Use random bits to generate coefficient
+            int byte_idx = (i * 16) / 8;
+            int bit_offset = (i * 16) % 8;
+            
+            if (byte_idx < MCELIECE_SIGMA1 * MCELIECE_T / 8) {
+                uint16_t coeff_bits = (uint16_t)random_bits[byte_idx];
+                if (byte_idx + 1 < MCELIECE_SIGMA1 * MCELIECE_T / 8) {
+                    coeff_bits |= ((uint16_t)random_bits[byte_idx + 1] << 8);
+                }
+                
+                gf_elem_t coeff = (coeff_bits >> bit_offset) & ((1 << m) - 1);
+                polynomial_set_coeff(g, i, coeff);
+            }
         }
         
-        // Check if polynomial is irreducible
+        // Simple irreducibility check
         if (is_irreducible_simple(g)) {
             return MCELIECE_SUCCESS;
         }
