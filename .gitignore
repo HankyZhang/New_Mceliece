@@ -1,37 +1,30 @@
-# Build artifacts
+# Compiled binaries
+mceliece
 *.o
-*.exe
-*.dll
-*.so
-*.a
+
+# Debug symbols (macOS)
+*.dSYM/
+
+# Temporary test files
+debug_*
+test_*
+!mceliece_test.*
 
 # IDE files
 .vscode/
-.vs/
-*.vcxproj*
-*.sln
+.idea/
+*.swp
+*.swo
 
-# CMake build directories
-cmake-build-*/
-build/
-debug/
-release/
-
-# Test executables
-test_*
-debug_test*
-simple_test*
-
-# Compiled main executable
-mceliece.exe
-mceliece
-
-# OS specific files
+# OS generated files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
-# Backup files
-*~
-*.bak
-*.swp
-*.tmp
+# Build artifacts
+cmake-build-*/
+build/
