@@ -1,36 +1,37 @@
 # Build artifacts
 *.o
-*.a
+*.exe
+*.dll
 *.so
-*.dylib
-mceliece
-test_gauss
-
-# CMake build directory
-cmake-build-debug/
-build/
-out/
+*.a
 
 # IDE files
-.idea/
 .vscode/
-*.swp
-*.swo
-*~
+.vs/
+*.vcxproj*
+*.sln
 
-# OS generated files
+# CMake build directories
+cmake-build-*/
+build/
+debug/
+release/
+
+# Test executables
+test_*
+debug_test*
+simple_test*
+
+# Compiled main executable
+mceliece.exe
+mceliece
+
+# OS specific files
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
 
-# Temporary files
+# Backup files
+*~
+*.bak
+*.swp
 *.tmp
-*.temp
-*.log
-
-# PDF files (optional - remove if you want to include them)
-*.pdf
