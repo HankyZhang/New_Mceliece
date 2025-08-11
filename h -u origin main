@@ -1,0 +1,3 @@
+[33mc1a6afc[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m  Add .gitignore to exclude build artifacts and executables
+[33m66c03a3[m  Complete Classic McEliece Implementation Debugging
+[33mc75b0dd[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Add Classic McEliece implementation with debugging improvements
