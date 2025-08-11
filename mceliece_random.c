@@ -58,14 +58,10 @@ mceliece_error_t generate_field_ordering(gf_elem_t *alpha, const uint8_t *random
     int sigma2_bits = 32;
     int sigma2_bytes = sigma2_bits / 8;
 
-    printf("    -> generate_field_ordering: Entered function.\n");
-    printf("    -> generate_field_ordering: First 8 random bytes for a_i: %02x %02x %02x %02x %02x %02x %02x %02x\n",
-           random_bits[0], random_bits[1], random_bits[2], random_bits[3],
-           random_bits[4], random_bits[5], random_bits[6], random_bits[7]);
+    // Field ordering generation function
 
     pair_t *pairs = malloc(q * sizeof(pair_t));
     if (!pairs) {
-        printf("    -> generate_field_ordering: FATAL - Malloc for pairs failed.\n");
         return MCELIECE_ERROR_MEMORY;
     }
 
@@ -80,8 +76,7 @@ mceliece_error_t generate_field_ordering(gf_elem_t *alpha, const uint8_t *random
         pairs[i].pos = i;
     }
 
-    // 2. 检查是否有重复值
-    printf("    -> generate_field_ordering: Checking for duplicates among %d values...\n", q);
+    // 2. Check for duplicate values
     pair_t *sorted_for_check = malloc(q * sizeof(pair_t));
     if (!sorted_for_check) { free(pairs); return MCELIECE_ERROR_MEMORY; }
     memcpy(sorted_for_check, pairs, q * sizeof(pair_t));
@@ -91,9 +86,6 @@ mceliece_error_t generate_field_ordering(gf_elem_t *alpha, const uint8_t *random
     for (int i = 0; i < q - 1; i++) {
         if (sorted_for_check[i].val == sorted_for_check[i+1].val) {
             has_duplicates = 1;
-            // ---> 新增日志
-            printf("    -> generate_field_ordering: FAILURE! Found duplicate value: %u at original positions %u and %u\n",
-                   sorted_for_check[i].val, sorted_for_check[i].pos, sorted_for_check[i+1].pos);
             break;
         }
     }
@@ -103,9 +95,6 @@ mceliece_error_t generate_field_ordering(gf_elem_t *alpha, const uint8_t *random
         free(pairs);
         return MCELIECE_ERROR_KEYGEN_FAIL;
     }
-
-    // ---> 新增日志
-    printf("    -> generate_field_ordering: No duplicates found. Proceeding to sort...\n");
 
     // 3. 按值对 (a_i, i) 进行字典序排序
     qsort(pairs, q, sizeof(pair_t), compare_pairs);
@@ -147,33 +136,7 @@ mceliece_error_t generate_field_ordering(gf_elem_t *alpha, const uint8_t *random
     return MCELIECE_SUCCESS;
 }
 
-static void get_field_poly_F(polynomial_t *F_y) {
-    int t = MCELIECE_T;
 
-    // 检查是否是我们正在实现的参数集 mceliece6688128 (t=128)
-    if (t == 128) {
-        // 根据规范，对于 mceliece6688128，
-        // F(y) = y^128 + y^7 + y^2 + y + 1
-
-        // 清零多项式以防有旧数据
-        memset(F_y->coeffs, 0, (F_y->max_degree + 1) * sizeof(gf_elem_t));
-        F_y->degree = -1;
-
-        // 设置非零系数。这些系数都是 F_q 中的元素 '1'。
-        polynomial_set_coeff(F_y, 0,   1); // y^0 项 (常数项)
-        polynomial_set_coeff(F_y, 1,   1); // y^1 项
-        polynomial_set_coeff(F_y, 2,   1); // y^2 项
-        polynomial_set_coeff(F_y, 7,   1); // y^7 项
-        polynomial_set_coeff(F_y, 128, 1); // y^128 项 (首项)
-
-    } else {
-        // 如果您的 MCELIECE_T 被设置为其他值，程序会报错退出。
-        // 这可以防止因为配置错误而产生无效的密钥。
-        fprintf(stderr, "FATAL ERROR: Field polynomial F(y) is not defined in the code for t=%d. "
-                        "Please define it for your chosen parameter set.\n", t);
-        exit(EXIT_FAILURE);
-    }
-}
 
 // 检查多项式是否不可约的简化方法
 static int is_irreducible_simple(const polynomial_t *poly) {
@@ -206,7 +169,7 @@ mceliece_error_t generate_irreducible_poly_final(polynomial_t *g, const uint8_t 
     int t = MCELIECE_T;
     int m = MCELIECE_M;
     
-    printf("    -> generate_irreducible_poly: Generating irreducible polynomial of degree %d...\n", t);
+    // Generate irreducible polynomial of degree t
     
     // 对于 mceliece6688128，我们使用一个已知的不可约多项式
     // 这是最可靠的方法，因为随机生成不可约多项式很困难
@@ -225,7 +188,6 @@ mceliece_error_t generate_irreducible_poly_final(polynomial_t *g, const uint8_t 
         polynomial_set_coeff(g, 7, 1);    // x^7 项
         polynomial_set_coeff(g, 128, 1);  // x^128 项（首项）
         
-        printf("    -> generate_irreducible_poly: Using known irreducible polynomial x^128 + x^7 + x^2 + x + 1.\n");
         return MCELIECE_SUCCESS;
     }
     
@@ -248,14 +210,12 @@ mceliece_error_t generate_irreducible_poly_final(polynomial_t *g, const uint8_t 
             polynomial_set_coeff(g, i, coeff);
         }
         
-        // 检查多项式是否不可约
+        // Check if polynomial is irreducible
         if (is_irreducible_simple(g)) {
-            printf("    -> generate_irreducible_poly: Generated irreducible polynomial x^%d + ... + %04x.\n", t, g->coeffs[0]);
             return MCELIECE_SUCCESS;
         }
     }
     
-    printf("    -> generate_irreducible_poly: Failed to generate irreducible polynomial after %d attempts.\n", max_attempts);
     return MCELIECE_ERROR_KEYGEN_FAIL;
 }
 

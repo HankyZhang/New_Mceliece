@@ -12,37 +12,42 @@ gf_elem_t *gf_antilog = NULL;
  * 它使用标准的“俄罗斯农夫乘法”(位移和异或)算法。
  */
 static gf_elem_t gf_mul_for_init(gf_elem_t a, gf_elem_t b) {
-    // Classic McEliece m=13 的不可约多项式是 x^13 + x^4 + x^3 + x + 1
-    // 这对应于二进制的 0b1 0000 0000 11011 = 0x201B
-    // 我们需要的是去掉最高位的多项式，用于约简：0x001B
+    // According to Classic McEliece specification, for m=13 the irreducible polynomial is:
+    // x^13 + x^4 + x^3 + x + 1
+    // In binary: 10000000011011 = 0x201B
+    // For reduction, we use the polynomial without the leading bit: 0x001B
     const gf_elem_t reducing_poly = 0x001B;
     gf_elem_t r = 0;
+    gf_elem_t temp_a = a;  // 使用临时变量，不修改原始参数
 
     // 我们将循环 m 次 (m=13)
     for (int i = 0; i < MCELIECE_M; i++) {
         // 如果 b 的当前最低位是 1
         if (b & 1) {
-            r ^= a;
+            r ^= temp_a;
         }
 
         // b 右移一位，准备处理下一位
         b >>= 1;
 
-        // a 左移一位 (相当于 a = a * x)
+        // temp_a 左移一位 (相当于 temp_a = temp_a * x)
         // 检查最高位 (x^12) 是否为 1
-        if (a & (1 << (MCELIECE_M - 1))) {
+        if (temp_a & (1 << (MCELIECE_M - 1))) {
             // 如果是，左移后会溢出，需要进行模约简
             // 1. 先左移
-            a <<= 1;
+            temp_a <<= 1;
             // 2. 然后与约简多项式异或
-            a ^= reducing_poly;
+            temp_a ^= reducing_poly;
         } else {
             // 如果不是，直接左移即可
-            a <<= 1;
+            temp_a <<= 1;
         }
+        // Ensure temp_a stays within the field bounds (13 bits)
+        temp_a &= ((1 << MCELIECE_M) - 1);
     }
 
-    return r;
+    // Ensure result stays within the field bounds (13 bits)
+    return r & ((1 << MCELIECE_M) - 1);
 }
 
 void gf_init(void) {
@@ -62,7 +67,7 @@ void gf_init(void) {
         }
     }
 
-    // ----> 后续的初始化逻辑保持完全不变 <----
+    // Initialize GF(2^13) lookup tables using generator element 3
     const gf_elem_t generator = 3;
     gf_elem_t p = 1;
     int i;
@@ -73,13 +78,22 @@ void gf_init(void) {
     for (i = 0; i < MCELIECE_Q - 1; i++) {
         gf_antilog[i] = p;
         gf_log[p] = (gf_elem_t)i;
+        gf_elem_t old_p = p;
         p = gf_mul_for_init(p, generator);
+        
+        // Check for infinite loop condition
+        if (i > 0 && p == 1) {
+            break;
+        }
+        
+        // Prevent potential infinite loops
+        if (i > 0 && p == old_p) {
+            fprintf(stderr, "ERROR: GF table generation stuck at iteration %d\n", i);
+            exit(1);
+        }
     }
 
     gf_log[0] = 0;
-
-    printf("GF(2^13) tables initialized successfully on the heap.\n");
-    fflush(stdout);
 }
 gf_elem_t gf_add(gf_elem_t a, gf_elem_t b) {
     return a ^ b;
@@ -87,22 +101,10 @@ gf_elem_t gf_add(gf_elem_t a, gf_elem_t b) {
 
 // ----> 您为外部使用而定义的、高效的查表版本保持不变 <----
 
-// 新的、快速且正确的 GF(2^13) 乘法
+// Optimized GF(2^13) multiplication using lookup tables
 gf_elem_t gf_mul(gf_elem_t a, gf_elem_t b) {
     if (a == 0 || b == 0) {
         return 0;
-    }
-    
-    // 添加调试信息
-    if (a == 1 && b == 1) {
-        printf("    -> gf_mul: Testing 1 * 1\n");
-        printf("    -> gf_mul: gf_log[1] = %d, gf_antilog[0] = %04x\n", gf_log[1], gf_antilog[0]);
-    }
-    
-    // 添加调试信息 for the problematic case
-    if (a == 1 && b == 0x1406) {
-        printf("    -> gf_mul: Testing 1 * 0x1406\n");
-        printf("    -> gf_mul: gf_log[1] = %d, gf_log[0x1406] = %d\n", gf_log[1], gf_log[0x1406]);
     }
     
     int log_a = gf_log[a];
@@ -111,19 +113,7 @@ gf_elem_t gf_mul(gf_elem_t a, gf_elem_t b) {
     if (sum_log >= MCELIECE_Q - 1) {
         sum_log -= (MCELIECE_Q - 1);
     }
-    gf_elem_t result = gf_antilog[sum_log];
-    
-    // 添加调试信息
-    if (a == 1 && b == 1) {
-        printf("    -> gf_mul: log_a=%d, log_b=%d, sum_log=%d, result=%04x\n", log_a, log_b, sum_log, result);
-    }
-    
-    // 添加调试信息 for the problematic case
-    if (a == 1 && b == 0x1406) {
-        printf("    -> gf_mul: log_a=%d, log_b=%d, sum_log=%d, result=%04x\n", log_a, log_b, sum_log, result);
-    }
-    
-    return result;
+    return gf_antilog[sum_log];
 }
 
 // 新的、快速且正确的 GF(2^13) 求逆
@@ -191,33 +181,21 @@ void gf_to_bits(gf_elem_t elem, uint8_t *bits, int start_bit) {
     }
 }
 
-// 多项式在GF中的求值
+// Efficient polynomial evaluation using Horner's method
 gf_elem_t polynomial_eval(const polynomial_t *poly, gf_elem_t x) {
     if (poly->degree < 0) {
-        return 0; // 零多项式
+        return 0; // Zero polynomial
     }
 
-    printf("    -> polynomial_eval: Evaluating polynomial of degree %d at x=%04x\n", poly->degree, x);
-    printf("    -> polynomial_eval: Coefficients: ");
-    for (int i = 0; i <= poly->degree; i++) {
-        printf("%04x ", poly->coeffs[i]);
-    }
-    printf("\n");
-
-    // 从最高次项系数开始
+    // Use Horner's method: start with highest degree coefficient
     gf_elem_t result = poly->coeffs[poly->degree];
-    printf("    -> polynomial_eval: Starting with result = %04x (coefficient of x^%d)\n", result, poly->degree);
 
-    // 向下迭代到常数项
+    // Iterate down to constant term
     for (int i = poly->degree - 1; i >= 0; i--) {
-        printf("    -> polynomial_eval: Step %d: result = %04x, coeff[%d] = %04x\n", poly->degree - i, result, i, poly->coeffs[i]);
         result = gf_mul(result, x);
-        printf("    -> polynomial_eval: After gf_mul(result, x): result = %04x\n", result);
         result = gf_add(result, poly->coeffs[i]);
-        printf("    -> polynomial_eval: After gf_add(result, coeff[%d]): result = %04x\n", i, result);
     }
 
-    printf("    -> polynomial_eval: Final result = %04x\n", result);
     return result;
 }
 

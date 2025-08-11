@@ -52,13 +52,13 @@ void matrix_free(matrix_t *mat) {
     }
 }
 
-// 私钥创建
+// Private key creation
 private_key_t* private_key_create(void) {
     private_key_t *sk = malloc(sizeof(private_key_t));
-    sk->p = NULL;
     if (!sk) return NULL;
     
     memset(sk, 0, sizeof(private_key_t));
+    sk->p = NULL;
     
     // 初始化Goppa多项式
     polynomial_t *g = polynomial_create(MCELIECE_T);
@@ -83,10 +83,10 @@ private_key_t* private_key_create(void) {
     return sk;
 }
 
-// 私钥释放
+// Private key deallocation
 void private_key_free(private_key_t *sk) {
-    if (sk->p) free(sk->p);
     if (sk) {
+        if (sk->p) free(sk->p);
         if (sk->g.coeffs) free(sk->g.coeffs);
         if (sk->alpha) free(sk->alpha);
         free(sk);

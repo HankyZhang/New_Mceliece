@@ -4,19 +4,19 @@
 #include "gf.h"
 #include  "vector.h"
 
-// Berlekamp-Massey算法：求解线性反馈移位寄存器
-// 输入：syndrome序列s[0], s[1], ..., s[2t-1]
-// 输出：错误定位多项式sigma和错误求值多项式omega
+// Berlekamp-Massey Algorithm according to Classic McEliece specification
+// Input: syndrome sequence s[0], s[1], ..., s[2t-1]
+// Output: error locator polynomial sigma and error evaluator polynomial omega
 mceliece_error_t berlekamp_massey(const gf_elem_t *syndrome, 
                                  polynomial_t *sigma, polynomial_t *omega) {
     if (!syndrome || !sigma || !omega) {
         return MCELIECE_ERROR_INVALID_PARAM;
     }
     
-    // 初始化多项式
-    polynomial_t *C = polynomial_create(MCELIECE_T);  // 当前连接多项式
-    polynomial_t *B = polynomial_create(MCELIECE_T);  // 备用多项式
-    polynomial_t *T = polynomial_create(MCELIECE_T);  // 临时多项式
+    // Initialize polynomials
+    polynomial_t *C = polynomial_create(MCELIECE_T);  // Current connection polynomial
+    polynomial_t *B = polynomial_create(MCELIECE_T);  // Backup polynomial
+    polynomial_t *T = polynomial_create(MCELIECE_T);  // Temporary polynomial
     
     if (!C || !B || !T) {
         polynomial_free(C);
@@ -25,51 +25,52 @@ mceliece_error_t berlekamp_massey(const gf_elem_t *syndrome,
         return MCELIECE_ERROR_MEMORY;
     }
     
-    // 初始状态：C(x) = 1, B(x) = 1
+    // Initial state: C(x) = 1, B(x) = 1
     polynomial_set_coeff(C, 0, 1);
     polynomial_set_coeff(B, 0, 1);
     
-    int L = 0;          // 当前LFSR长度
-    int m = 1;          // 修正量计数器
-    gf_elem_t b = 1;    // 上一个最佳偏差
+    int L = 0;          // Current LFSR length
+    int m = 1;          // Step counter since last L update
+    gf_elem_t b = 1;    // Last best discrepancy
     
-    // 对每个syndrome元素进行迭代
+    // Iterate through each syndrome element
     for (int N = 0; N < 2 * MCELIECE_T; N++) {
-        // 计算偏差d_N
+        // Calculate discrepancy d_N = s_N + Σ C_i * s_{N-i}
         gf_elem_t d = syndrome[N];
         
-        for (int i = 1; i <= L; i++) {
-            if (C->coeffs[i] != 0) {
+        for (int i = 1; i <= L && (N - i) >= 0; i++) {
+            if (i <= C->degree && C->coeffs[i] != 0) {
                 d = gf_add(d, gf_mul(C->coeffs[i], syndrome[N - i]));
             }
         }
         
         if (d == 0) {
-            // 偏差为0，不需要修正
+            // Discrepancy is 0, no correction needed
             m++;
         } else {
-            // 偏差非0，需要修正
+            // Discrepancy is non-zero, correction needed
             
-            // 保存当前的C到T：T(x) = C(x)
+            // Save current C to T: T(x) = C(x)
             polynomial_copy(T, C);
             
-            // 修正：C(x) = C(x) - (d/b) * x^m * B(x)
+            // Correction: C(x) = C(x) - (d/b) * x^m * B(x)
             if (b != 0) {
                 gf_elem_t correction_coeff = gf_div(d, b);
                 
-                for (int i = 0; i <= B->degree && i + m <= C->max_degree; i++) {
-                    if (B->coeffs[i] != 0) {
+                for (int i = 0; i <= B->degree; i++) {
+                    if (B->coeffs[i] != 0 && (i + m) <= C->max_degree) {
                         gf_elem_t term = gf_mul(correction_coeff, B->coeffs[i]);
-                        gf_elem_t new_coeff = gf_add(C->coeffs[i + m], term);
+                        gf_elem_t current_coeff = (i + m <= C->degree) ? C->coeffs[i + m] : 0;
+                        gf_elem_t new_coeff = gf_add(current_coeff, term);
                         polynomial_set_coeff(C, i + m, new_coeff);
                     }
                 }
             }
             
-            // 判断是否需要更新L
+            // Check if L needs to be updated
             if (2 * L <= N) {
                 L = N + 1 - L;
-                polynomial_copy(B, T);  // B(x) = T(x) (即原来的C(x))
+                polynomial_copy(B, T);  // B(x) = T(x) (the old C(x))
                 b = d;
                 m = 1;
             } else {
@@ -78,14 +79,14 @@ mceliece_error_t berlekamp_massey(const gf_elem_t *syndrome,
         }
     }
     
-    // 输出错误定位多项式
+    // Output error locator polynomial
     polynomial_copy(sigma, C);
     
-    // 计算错误求值多项式omega
+    // Calculate error evaluator polynomial omega
     // omega(x) = sigma(x) * S(x) mod x^(2t)
-    // 其中S(x) = s[0] + s[1]*x + s[2]*x^2 + ...
+    // where S(x) = s[0] + s[1]*x + s[2]*x^2 + ...
     
-    // 构造syndrome多项式S(x)
+    // Construct syndrome polynomial S(x)
     polynomial_t *S = polynomial_create(2 * MCELIECE_T - 1);
     if (!S) {
         polynomial_free(C);
@@ -98,23 +99,24 @@ mceliece_error_t berlekamp_massey(const gf_elem_t *syndrome,
         polynomial_set_coeff(S, i, syndrome[i]);
     }
     
-    // 计算sigma * S的前2t项
+    // Calculate first 2t terms of sigma * S
     memset(omega->coeffs, 0, (omega->max_degree + 1) * sizeof(gf_elem_t));
     omega->degree = -1;
     
-    for (int i = 0; i <= sigma->degree && i < 2 * MCELIECE_T; i++) {
+    for (int i = 0; i <= sigma->degree; i++) {
         if (sigma->coeffs[i] != 0) {
-            for (int j = 0; j <= S->degree && i + j < 2 * MCELIECE_T; j++) {
-                if (S->coeffs[j] != 0 && i + j <= omega->max_degree) {
+            for (int j = 0; j <= S->degree && (i + j) < 2 * MCELIECE_T; j++) {
+                if (S->coeffs[j] != 0 && (i + j) <= omega->max_degree) {
                     gf_elem_t term = gf_mul(sigma->coeffs[i], S->coeffs[j]);
-                    gf_elem_t new_coeff = gf_add(omega->coeffs[i + j], term);
+                    gf_elem_t current_coeff = ((i + j) <= omega->degree) ? omega->coeffs[i + j] : 0;
+                    gf_elem_t new_coeff = gf_add(current_coeff, term);
                     polynomial_set_coeff(omega, i + j, new_coeff);
                 }
             }
         }
     }
     
-    // 清理
+    // Cleanup
     polynomial_free(C);
     polynomial_free(B);
     polynomial_free(T);
@@ -123,7 +125,8 @@ mceliece_error_t berlekamp_massey(const gf_elem_t *syndrome,
     return MCELIECE_SUCCESS;
 }
 
-// Chien搜索：寻找错误定位多项式的根
+// Chien Search: Find roots of error locator polynomial
+// According to section 3.3.1: Check σ(α_j^{-1}) = 0 for error locations
 mceliece_error_t chien_search(const polynomial_t *sigma, const gf_elem_t *alpha,
                              int *error_positions, int *num_errors) {
     if (!sigma || !alpha || !error_positions || !num_errors) {
@@ -132,19 +135,19 @@ mceliece_error_t chien_search(const polynomial_t *sigma, const gf_elem_t *alpha,
     
     *num_errors = 0;
     
-    // 对支撑集中的每个元素alpha[j]，检查sigma(1/alpha[j])是否为0
+    // For each element alpha[j] in the support set, check if σ(1/α_j) = 0
     for (int j = 0; j < MCELIECE_N; j++) {
-        if (alpha[j] == 0) continue;  // 跳过0元素
+        if (alpha[j] == 0) continue;  // Skip zero elements
         
         gf_elem_t alpha_inv = gf_inv(alpha[j]);
         gf_elem_t result = polynomial_eval(sigma, alpha_inv);
         
         if (result == 0) {
-            // 找到一个根，对应错误位置
+            // Found a root, corresponding to error position
             error_positions[*num_errors] = j;
             (*num_errors)++;
             
-            if (*num_errors >= MCELIECE_T) break;  // 最多t个错误
+            if (*num_errors >= MCELIECE_T) break;  // At most t errors
         }
     }
     
@@ -215,7 +218,7 @@ mceliece_error_t decode_goppa(const uint8_t *received, const polynomial_t *g,
     
     compute_syndrome(received, g, alpha, syndrome);
     
-    // 检查syndrome是否全零（无错误）
+    // Check if syndrome is all zero (no errors)
     int has_error = 0;
     for (int i = 0; i < 2 * MCELIECE_T; i++) {
         if (syndrome[i] != 0) {
@@ -225,7 +228,7 @@ mceliece_error_t decode_goppa(const uint8_t *received, const polynomial_t *g,
     }
     
     if (!has_error) {
-        // 无错误
+        // No errors
         memset(error_vector, 0, MCELIECE_N_BYTES);
         *decode_success = 1;
         free(syndrome);
@@ -270,26 +273,43 @@ mceliece_error_t decode_goppa(const uint8_t *received, const polynomial_t *g,
         return ret;
     }
     
-    // 检查错误个数是否正确
-    if (num_errors != sigma->degree) {
-        // 解码失败
+    // Check if the number of errors matches the degree of sigma
+    // For binary codes, this should be equal for successful decoding
+    if (num_errors == 0 || num_errors != sigma->degree) {
+        // Decoding failed - no errors found or mismatch
+        *decode_success = 0;
         free(syndrome);
         polynomial_free(sigma);
         polynomial_free(omega);
         free(error_positions);
-        return MCELIECE_SUCCESS;  // 不是错误，只是解码失败
+        return MCELIECE_SUCCESS;  // Not an error, just decoding failure
     }
     
-    // 步骤4：构造错误向量
+    // Step 4: Construct error vector
     memset(error_vector, 0, MCELIECE_N_BYTES);
 
     for (int i = 0; i < num_errors; i++) {
-        // 将旧的调用: vector_set_bit(error_vector, error_positions[i]);
-        // 修改为新的调用，并添加第三个参数 '1'
-        vector_set_bit(error_vector, error_positions[i], 1);
+        // Validate error position
+        if (error_positions[i] >= 0 && error_positions[i] < MCELIECE_N) {
+            vector_set_bit(error_vector, error_positions[i], 1);
+        } else {
+            // Invalid error position, decoding failed
+            *decode_success = 0;
+            free(syndrome);
+            polynomial_free(sigma);
+            polynomial_free(omega);
+            free(error_positions);
+            return MCELIECE_SUCCESS;
+        }
     }
     
-    *decode_success = 1;
+    // Final validation: check if we have exactly t errors
+    int actual_weight = vector_weight(error_vector, MCELIECE_N_BYTES);
+    if (actual_weight == num_errors && num_errors <= MCELIECE_T) {
+        *decode_success = 1;
+    } else {
+        *decode_success = 0;
+    }
     
     // 清理内存
     free(syndrome);

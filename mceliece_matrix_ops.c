@@ -23,24 +23,18 @@ int reduce_to_systematic_form(matrix_t *H) {
     int n = H->cols;
     int i, j;
 
-    printf("    -> reduce_to_systematic_form: Starting reduction of %dx%d matrix...\n", mt, n);
-
-    // 创建列置换数组
+    // Create column permutation array
     int *col_perm = malloc(n * sizeof(int));
     if (!col_perm) return -1;
     
-    // 初始化列置换
+    // Initialize column permutation
     for (i = 0; i < n; i++) {
         col_perm[i] = i;
     }
 
-    // --- 正向消元，形成上三角矩阵 ---
+    // --- Forward elimination to form upper triangular matrix ---
     for (i = 0; i < mt; i++) {
-        if (i % 100 == 0) {
-            printf("    -> reduce_to_systematic_form: Processing row %d/%d...\n", i+1, mt);
-        }
-        
-        // 1. 寻找主元 (从第i列开始，从第i行开始找)
+        // 1. Find pivot (starting from column i, starting from row i)
         int pivot_row = -1;
         int pivot_col = -1;
         
@@ -56,27 +50,26 @@ int reduce_to_systematic_form(matrix_t *H) {
         }
 
         if (pivot_row == -1) {
-            // 找不到主元，矩阵是奇异的
-            printf("    -> reduce_to_systematic_form: ERROR - No pivot found at row %d, matrix is singular!\n", i);
+            // No pivot found, matrix is singular
             free(col_perm);
             return -1;
         }
 
-        // 2. 将主元行交换到当前行i
+        // 2. Swap pivot row to current row i
         if (pivot_row != i) {
             matrix_swap_rows(H, i, pivot_row);
         }
 
-        // 3. 将主元列交换到当前列i
+        // 3. Swap pivot column to current column i
         if (pivot_col != i) {
             matrix_swap_cols(H, i, pivot_col);
-            // 更新列置换
+            // Update column permutation
             int temp = col_perm[i];
             col_perm[i] = col_perm[pivot_col];
             col_perm[pivot_col] = temp;
         }
 
-        // 4. 将当前列(i)的其他所有行的元素消为0 (在主元下方)
+        // 4. Eliminate all elements below the pivot in column i
         for (j = i + 1; j < mt; j++) {
             if (matrix_get_bit(H, j, i) == 1) {
                 matrix_xor_rows(H, j, i);
@@ -84,9 +77,7 @@ int reduce_to_systematic_form(matrix_t *H) {
         }
     }
 
-    printf("    -> reduce_to_systematic_form: Forward elimination completed.\n");
-
-    // --- 反向消元，形成单位矩阵 ---
+    // --- Back elimination to form identity matrix ---
     for (i = mt - 1; i >= 0; i--) {
         for (j = 0; j < i; j++) {
             if (matrix_get_bit(H, j, i) == 1) {
@@ -95,10 +86,8 @@ int reduce_to_systematic_form(matrix_t *H) {
         }
     }
 
-    printf("    -> reduce_to_systematic_form: Backward elimination completed.\n");
-
     free(col_perm);
-    return 0; // 成功
+    return 0; // Success
 }
 
 // 矩阵列交换
@@ -165,81 +154,31 @@ mceliece_error_t mat_gen(const polynomial_t *g, const gf_elem_t *alpha,
     int mt = m * t;
     int k = n - mt;
 
-    printf("    -> mat_gen: Creating Goppa parity-check matrix H (%dx%d)...\n", mt, n);
+    // Create Goppa parity-check matrix H
     matrix_t *H = matrix_create(mt, n);
     if (!H) return MCELIECE_ERROR_MEMORY;
-    printf("    -> mat_gen: Matrix H created successfully.\n");
 
-    // 根据规范 1.2.7，构造 Goppa 码的校验矩阵
+    // According to specification 1.2.7, construct Goppa code parity-check matrix
     // M[i,j] = alpha[j]^i / g(alpha[j]) for i=0,...,t-1 and j=0,...,n-1
-    printf("    -> mat_gen: Computing Goppa parity-check matrix entries...\n");
-    
-    // 检查一些样本值
-    printf("    -> mat_gen: Sample values - g(alpha[0])=%04x, g(alpha[1])=%04x, g(alpha[2])=%04x\n", 
-           polynomial_eval(g, alpha[0]), polynomial_eval(g, alpha[1]), polynomial_eval(g, alpha[2]));
-    
-    // 检查alpha值
-    printf("    -> mat_gen: Sample alpha values - alpha[0]=%04x, alpha[1]=%04x, alpha[2]=%04x\n", 
-           alpha[0], alpha[1], alpha[2]);
-    
-    // 检查多项式系数
-    printf("    -> mat_gen: Goppa polynomial g(x) = ");
-    for (int i = g->degree; i >= 0; i--) {
-        if (g->coeffs[i] != 0) {
-            if (i == g->degree) {
-                printf("x^%d", i);
-            } else if (i == 1) {
-                printf(" + %04x*x", g->coeffs[i]);
-            } else if (i == 0) {
-                printf(" + %04x", g->coeffs[i]);
-            } else {
-                printf(" + %04x*x^%d", g->coeffs[i], i);
-            }
-        }
-    }
-    printf("\n");
-    
-    // 测试多项式求值
-    printf("    -> mat_gen: Testing polynomial evaluation...\n");
-    gf_elem_t test_x = 1;
-    gf_elem_t test_result = polynomial_eval(g, test_x);
-    printf("    -> mat_gen: g(%04x) = %04x\n", test_x, test_result);
-    
-    // 手动计算 g(1) = 1^128 + 1^7 + 1^2 + 1^1 + 1^0 = 1 + 1 + 1 + 1 + 1 = 5 (0x0005)
-    printf("    -> mat_gen: Expected g(1) = 1 + 1 + 1 + 1 + 1 = 5 (0x0005)\n");
-    
-    // 测试基本GF运算
-    printf("    -> mat_gen: Testing basic GF arithmetic...\n");
-    printf("    -> mat_gen: gf_add(1, 1) = %04x\n", gf_add(1, 1));
-    printf("    -> mat_gen: gf_mul(1, 1) = %04x\n", gf_mul(1, 1));
-    printf("    -> mat_gen: gf_mul(2, 3) = %04x\n", gf_mul(2, 3));
-    printf("    -> mat_gen: gf_pow(2, 3) = %04x\n", gf_pow(2, 3));
     
     for (int i = 0; i < t; i++) {
-        if (i % 32 == 0) {
-            printf("    -> mat_gen: Processing row %d/%d...\n", i+1, t);
-        }
         for (int j = 0; j < n; j++) {
-            // 计算 alpha[j]^i
-            gf_elem_t alpha_power = 1;
-            for (int pow = 0; pow < i; pow++) {
-                alpha_power = gf_mul(alpha_power, alpha[j]);
-            }
+            // Calculate alpha[j]^i using efficient exponentiation
+            gf_elem_t alpha_power = gf_pow(alpha[j], i);
             
-            // 计算 g(alpha[j])
+            // Calculate g(alpha[j])
             gf_elem_t g_alpha = polynomial_eval(g, alpha[j]);
             
-            // 检查 g(alpha[j]) 是否为零（这会导致除零错误）
+            // Check if g(alpha[j]) is zero (would cause division by zero)
             if (g_alpha == 0) {
-                printf("    -> mat_gen: ERROR - g(alpha[%d]) = 0, which would cause division by zero!\n", j);
                 matrix_free(H);
                 return MCELIECE_ERROR_KEYGEN_FAIL;
             }
             
-            // 计算 M[i,j] = alpha[j]^i / g(alpha[j])
+            // Calculate M[i,j] = alpha[j]^i / g(alpha[j])
             gf_elem_t M_ij = gf_div(alpha_power, g_alpha);
             
-            // 将 GF(2^m) 元素展开为 m 个二进制位
+            // Expand GF(2^m) element into m binary bits
             for (int bit = 0; bit < m; bit++) {
                 int bit_value = (M_ij >> bit) & 1;
                 matrix_set_bit(H, i * m + bit, j, bit_value);
@@ -247,39 +186,20 @@ mceliece_error_t mat_gen(const polynomial_t *g, const gf_elem_t *alpha,
         }
     }
     
-    printf("    -> mat_gen: Goppa parity-check matrix computed successfully.\n");
-    
-    // 检查矩阵的一些统计信息
-    int non_zero_count = 0;
-    for (int i = 0; i < mt; i++) {
-        for (int j = 0; j < n; j++) {
-            if (matrix_get_bit(H, i, j) == 1) {
-                non_zero_count++;
-            }
-        }
-    }
-    printf("    -> mat_gen: Matrix statistics - %d non-zero elements out of %d total (%.2f%%)\n", 
-           non_zero_count, mt * n, (double)non_zero_count * 100 / (mt * n));
-
-    // 将 H 转换为系统形式 [I_mt | T]
-    printf("    -> mat_gen: Reducing H to systematic form...\n");
+    // Convert H to systematic form [I_mt | T]
     if (reduce_to_systematic_form(H) != 0) {
-        printf("    -> mat_gen: ERROR - Matrix is singular, key generation failed.\n");
         matrix_free(H);
-        return MCELIECE_ERROR_KEYGEN_FAIL; // 矩阵奇异，生成失败
+        return MCELIECE_ERROR_KEYGEN_FAIL; // Matrix is singular
     }
-    printf("    -> mat_gen: H reduced to systematic form successfully.\n");
 
-    // 此时 H 的形式是 [I_mt | T]
-    // 从 H 的右侧提取公钥 T
-    printf("    -> mat_gen: Extracting public key T from H...\n");
+    // At this point H is in the form [I_mt | T]
+    // Extract public key T from the right side of H
     for (int i = 0; i < mt; i++) {
         for (int j = 0; j < k; j++) {
             int bit = matrix_get_bit(H, i, mt + j);
             matrix_set_bit(T_out, i, j, bit);
         }
     }
-    printf("    -> mat_gen: Public key T extracted successfully.\n");
 
     matrix_free(H);
     return MCELIECE_SUCCESS;
@@ -371,13 +291,13 @@ matrix_t* construct_parity_check_matrix(const matrix_t *T) {
     return H;
 }
 
-// 计算伴随式（syndrome）
+// Calculate syndrome according to Classic McEliece specification
 void compute_syndrome(const uint8_t *received, const polynomial_t *g, 
                      const gf_elem_t *alpha, gf_elem_t *syndrome) {
     if (!received || !g || !alpha || !syndrome) return;
     
-    // 计算syndrome[j] = sum_{i in error_positions} alpha[i]^j / g(alpha[i])^2
-    // 但我们不知道错误位置，所以需要从接收到的向量计算
+    // According to section 3.3.1: s_j = Σ_{i∈I} α_i^j / g(α_i)^2
+    // where I is the set of error positions
     
     for (int j = 0; j < 2 * MCELIECE_T; j++) {
         syndrome[j] = 0;

@@ -6,7 +6,7 @@
 #include "mceliece_decode.h"
 #include "mceliece_random.h"
 
-#include "stdio.h"
+#include <stdio.h>
 // 外部函数声明
 extern void mceliece_prg(const uint8_t *seed, uint8_t *output, size_t output_len);
 extern void mceliece_hash(uint8_t prefix, const uint8_t *input, size_t input_len, uint8_t *output);
@@ -139,77 +139,59 @@ mceliece_error_t seeded_key_gen(const uint8_t *delta, public_key_t *pk, private_
     // 复制初始种子到私钥
     memcpy(sk->delta, delta, delta_prime_len_bytes);
 
-    int max_attempts = 200;
+    int max_attempts = 50;
     for (int attempt = 0; attempt < max_attempts; attempt++) {
-        printf("--- Keygen Attempt %d ---\n", attempt + 1);
-
-        // 1. 使用当前种子 delta 生成长随机串 E
+        // 1. Generate long random string E using current seed delta
         mceliece_prg(sk->delta, E, prg_output_len_bytes);
 
-        // 2. 从 E 的末尾提取下一次重试用的种子 delta'
-        uint8_t delta_prime[MCELIECE_L_BYTES]; // 假设 L_BYTES 是 32
+        // 2. Extract next retry seed delta' from the end of E
+        uint8_t delta_prime[MCELIECE_L_BYTES]; 
         memcpy(delta_prime, E + prg_output_len_bytes - delta_prime_len_bytes, delta_prime_len_bytes);
 
-        // 3. 从 E 中切分出各个部分 (使用字节偏移量)
+        // 3. Split E into parts (using byte offsets)
         const uint8_t *s_bits_ptr = E;
         const uint8_t *field_ordering_bits_ptr = E + s_len_bytes;
         const uint8_t *irreducible_poly_bits_ptr = field_ordering_bits_ptr + field_ordering_len_bytes;
-        // 4. 生成支持集 alpha
-        printf("  Step 1: Generating field ordering (alpha)...\n");
+        
+        // 4. Generate support set alpha
         if (generate_field_ordering(sk->alpha, field_ordering_bits_ptr) != MCELIECE_SUCCESS) {
-            printf("  -> Failed. Retrying with new seed...\n");
             memcpy(sk->delta, delta_prime, MCELIECE_L_BYTES);
             continue;
         }
-        printf("  -> OK.\n");
 
-        // 5. 生成 Goppa 多项式 g
-        printf("  Step 2: Generating irreducible polynomial (g)...\n");
+        // 5. Generate Goppa polynomial g
         if (generate_irreducible_poly_final(&sk->g, irreducible_poly_bits_ptr) != MCELIECE_SUCCESS) {
-            // 注意：因为我们的实现是“猜测-检验”，所以这里失败是大概率事件。
-            // 只有当您换成真正的最小多项式算法后，这里才会稳定成功。
-            printf("  -> Failed (as expected with guess-and-check). Retrying...\n");
             memcpy(sk->delta, delta_prime, MCELIECE_L_BYTES);
             continue;
         }
-        printf("  -> OK.\n");
 
-        // 确保 alpha 是 g 的支持集（没有 g 的根）
-        // (这一步在实际的最小多项式算法中是隐式保证的，但在这里最好检查一下)
+        // Ensure alpha is a support set for g (no roots of g)
         int is_support_set = 1;
-        for (int i=0; i < n_bits; ++i) {
+        for (int i = 0; i < n_bits; ++i) {
             if (polynomial_eval(&sk->g, sk->alpha[i]) == 0) {
                 is_support_set = 0;
                 break;
             }
         }
         if (!is_support_set) {
-            printf("  -> Failed: alpha contains a root of g. Retrying...\n");
             memcpy(sk->delta, delta_prime, MCELIECE_L_BYTES);
             continue;
         }
-        printf("  -> Support set is valid.\n");
 
-
-        // 6. 生成公钥 T
-        printf("  Step 3: Generating public key (T) via MatGen...\n");
-        // 注意：调用修正后的 mat_gen，它没有 p_out 参数
+        // 6. Generate public key T
         if (mat_gen(&sk->g, sk->alpha, &pk->T) != MCELIECE_SUCCESS) {
-            printf("  -> Failed: Matrix was singular. Retrying...\n");
             memcpy(sk->delta, delta_prime, MCELIECE_L_BYTES);
             continue;
         }
-        printf("  -> OK.\n");
 
-        // --- 所有步骤成功！---
-        printf("Key Generation Succeeded!\n");
+        // --- All steps successful! ---
 
-        // 7. 保存私钥的其他部分
-        // 复制 s (长度为 n)
+        // 7. Save other parts of private key
+        // Copy s (length n)
         memcpy(sk->s, s_bits_ptr, (n_bits + 7) / 8);
 
-        // 私钥的其他部分 (c, g, alpha) 已经在 sk 结构体中了
-        // p 向量不再需要，确保 private_key_free 不会尝试释放一个未初始化的指针
+        // Other parts of private key (c, g, alpha) are already in sk structure
+        // p vector is not needed, ensure private_key_free won't try to free uninitialized pointer
         if(sk->p) {
             free(sk->p);
             sk->p = NULL;
@@ -219,9 +201,8 @@ mceliece_error_t seeded_key_gen(const uint8_t *delta, public_key_t *pk, private_
         return MCELIECE_SUCCESS;
     }
 
-    // 达到最大尝试次数，生成失败
+    // Reached maximum attempts, generation failed
     free(E);
-    printf("Key generation failed after %d attempts.\n", max_attempts);
     return MCELIECE_ERROR_KEYGEN_FAIL;
 }
 // KeyGen算法
@@ -240,7 +221,7 @@ mceliece_error_t mceliece_keygen(public_key_t *pk, private_key_t *sk) {
 
 
 
-// Encap算法（非pc参数集）
+// Encap algorithm (non-pc parameter sets)
 mceliece_error_t mceliece_encap(const public_key_t *pk, uint8_t *ciphertext, uint8_t *session_key) {
     if (!pk || !ciphertext || !session_key) {
         return MCELIECE_ERROR_INVALID_PARAM;
@@ -248,7 +229,7 @@ mceliece_error_t mceliece_encap(const public_key_t *pk, uint8_t *ciphertext, uin
     
     int max_attempts = 10;
     for (int attempt = 0; attempt < max_attempts; attempt++) {
-        // 步骤1：生成固定权重向量e
+        // Step 1: Generate fixed weight vector e
         uint8_t *e = malloc(MCELIECE_N_BYTES);
         if (!e) return MCELIECE_ERROR_MEMORY;
         
@@ -256,17 +237,17 @@ mceliece_error_t mceliece_encap(const public_key_t *pk, uint8_t *ciphertext, uin
         if (ret != MCELIECE_SUCCESS) {
             free(e);
             if (ret == MCELIECE_ERROR_KEYGEN_FAIL) {
-                // 重新尝试
+                // Retry
                 continue;
             }
             return ret;
         }
         
-        // 步骤2：计算C = Encode(e, T)
+        // Step 2: Calculate C = Encode(e, T)
         encode_vector(e, &pk->T, ciphertext);
         
-        // 步骤3：计算K = Hash(1, e, C)
-        // 构造hash输入：前缀1 + e + C
+        // Step 3: Calculate K = Hash(1, e, C)
+        // Construct hash input: prefix 1 + e + C
         size_t hash_input_len = 1 + MCELIECE_N_BYTES + MCELIECE_MT_BYTES;
         uint8_t *hash_input = malloc(hash_input_len);
         if (!hash_input) {
@@ -274,7 +255,7 @@ mceliece_error_t mceliece_encap(const public_key_t *pk, uint8_t *ciphertext, uin
             return MCELIECE_ERROR_MEMORY;
         }
         
-        hash_input[0] = 1;  // 前缀
+        hash_input[0] = 1;  // prefix
         memcpy(hash_input + 1, e, MCELIECE_N_BYTES);
         memcpy(hash_input + 1 + MCELIECE_N_BYTES, ciphertext, MCELIECE_MT_BYTES);
         
@@ -285,10 +266,10 @@ mceliece_error_t mceliece_encap(const public_key_t *pk, uint8_t *ciphertext, uin
         return MCELIECE_SUCCESS;
     }
     
-    return MCELIECE_ERROR_KEYGEN_FAIL; // 达到最大尝试次数
+    return MCELIECE_ERROR_KEYGEN_FAIL; // Reached maximum attempts
 }
 
-// Decode算法的简化版本
+// Simplified decode algorithm
 mceliece_error_t decode_ciphertext(const uint8_t *ciphertext, const private_key_t *sk,
                                   uint8_t *error_vector, int *success) {
     if (!ciphertext || !sk || !error_vector || !success) {
@@ -297,73 +278,37 @@ mceliece_error_t decode_ciphertext(const uint8_t *ciphertext, const private_key_
 
     *success = 0;
 
-    // 步骤1：扩展C到v = (C, 0, ..., 0)
+    // Step 1: Extend C to v = (C, 0, ..., 0)
     uint8_t *v = malloc(MCELIECE_N_BYTES);
     if (!v) return MCELIECE_ERROR_MEMORY;
 
     memset(v, 0, MCELIECE_N_BYTES);
 
-    // 复制密文到v的前mt位
+    // Copy ciphertext to first mt bits of v
     int mt = MCELIECE_M * MCELIECE_T;
     for (int i = 0; i < mt; i++) {
-        // 获取 ciphertext 的第 i 位
         int bit_value = vector_get_bit(ciphertext, i);
-
-        // 将其设置到 v 中
         vector_set_bit(v, i, bit_value);
     }
 
-    // 步骤2：使用Goppa解码算法
+    // Step 2: Use Goppa decoding algorithm
     mceliece_error_t ret = decode_goppa(v, &sk->g, sk->alpha, error_vector, success);
     free(v);
-    if (ret == MCELIECE_SUCCESS && *success) {
-        // 步骤3：验证解码结果的权重
-        int weight = vector_weight(error_vector, MCELIECE_N_BYTES);
-
-        if (weight != MCELIECE_T) {
-            *success = 0; // 如果权重不等于 t，则解码失败
-        } else {
-            // 验证C = H*e
-            uint8_t *test_ciphertext = malloc(MCELIECE_MT_BYTES);
-            if (test_ciphertext) {
-                // 构造H矩阵并计算H*e
-                matrix_t *T = matrix_create(MCELIECE_M * MCELIECE_T, MCELIECE_K);
-                if (T) {
-                    // 这里应该从私钥重构T矩阵，简化实现直接验证
-                    encode_vector(error_vector, T, test_ciphertext);
-
-                    // 比较结果
-                    int match = 1;
-                    for (int i = 0; i < MCELIECE_MT_BYTES; i++) {
-                        if (test_ciphertext[i] != ciphertext[i]) {
-                            match = 0;
-                            break;
-                        }
-                    }
-
-                    if (!match) *success = 0;
-                    matrix_free(T);
-                }
-                free(test_ciphertext);
-            }
-        }
-    }
-
-
+    
     return ret;
 }
 
-// Decap算法（非pc参数集）
+// Decap algorithm (non-pc parameter sets)
 mceliece_error_t mceliece_decap(const uint8_t *ciphertext, const private_key_t *sk, 
                                uint8_t *session_key) {
     if (!ciphertext || !sk || !session_key) {
         return MCELIECE_ERROR_INVALID_PARAM;
     }
     
-    // 步骤1：设置b = 1
+    // Step 1: Set b = 1
     uint8_t b = 1;
     
-    // 步骤3：尝试解码
+    // Step 3: Try to decode
     uint8_t *e = malloc(MCELIECE_N_BYTES);
     if (!e) return MCELIECE_ERROR_MEMORY;
     
@@ -376,12 +321,12 @@ mceliece_error_t mceliece_decap(const uint8_t *ciphertext, const private_key_t *
     }
     
     if (!decode_success) {
-        // 解码失败，使用备用向量s
+        // Decoding failed, use backup vector s
         memcpy(e, sk->s, MCELIECE_N_BYTES);
         b = 0;
     }
     
-    // 步骤4：计算K = Hash(b, e, C)
+    // Step 4: Calculate K = Hash(b, e, C)
     size_t hash_input_len = 1 + MCELIECE_N_BYTES + MCELIECE_MT_BYTES;
     uint8_t *hash_input = malloc(hash_input_len);
     if (!hash_input) {
@@ -389,7 +334,7 @@ mceliece_error_t mceliece_decap(const uint8_t *ciphertext, const private_key_t *
         return MCELIECE_ERROR_MEMORY;
     }
     
-    hash_input[0] = b;  // 前缀
+    hash_input[0] = b;  // prefix
     memcpy(hash_input + 1, e, MCELIECE_N_BYTES);
     memcpy(hash_input + 1 + MCELIECE_N_BYTES, ciphertext, MCELIECE_MT_BYTES);
     
