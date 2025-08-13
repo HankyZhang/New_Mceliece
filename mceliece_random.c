@@ -24,32 +24,7 @@ int compare_pairs(const void *a, const void *b) {
     return 0;
 }
 
-// 简单的伪随机数生成器状态
-static uint64_t rng_state = 1;
 
-// 设置随机种子
-void set_random_seed(uint64_t seed) {
-    rng_state = seed ? seed : 1;
-}
-
-// 初始化随机种子（使用当前时间）
-void init_random(void) {
-    set_random_seed((uint64_t)time(NULL));
-}
-
-// 生成随机字节
-uint8_t random_byte(void) {
-    // 简单的线性同余生成器
-    rng_state = rng_state * 1103515245ULL + 12345ULL;
-    return (uint8_t)(rng_state >> 32);
-}
-
-// 生成随机字节数组
-void random_bytes(uint8_t *output, int len) {
-    for (int i = 0; i < len; i++) {
-        output[i] = random_byte();
-    }
-}
 
 
 mceliece_error_t generate_field_ordering(gf_elem_t *alpha, const uint8_t *random_bits) {

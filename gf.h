@@ -52,12 +52,6 @@ extern "C" {
     // 多项式除法: q(x) = a(x) / b(x), r(x) = a(x) mod b(x)
     void polynomial_div(polynomial_t *q, polynomial_t *r, const polynomial_t *a, const polynomial_t *b);
 
-    // 多项式最大公约数: result(x) = gcd(a(x), b(x))
-    void polynomial_gcd(polynomial_t *result, const polynomial_t *a, const polynomial_t *b);
-
-    // 多项式 x^exp mod f(x)
-    void polynomial_pow_mod(polynomial_t *result, unsigned long exp, const polynomial_t *f);
-
 
     // 函数原型
     matrix_fq_t* matrix_fq_create(int rows, int cols);

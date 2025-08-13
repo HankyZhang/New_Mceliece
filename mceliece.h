@@ -18,9 +18,7 @@ extern "C" {
 
     // 序列化
     mceliece_error_t serialize_public_key(const public_key_t *pk, uint8_t *buffer, size_t buffer_len);
-    mceliece_error_t deserialize_public_key(public_key_t *pk, const uint8_t *buffer, size_t buffer_len);
     mceliece_error_t serialize_private_key(const private_key_t *sk, uint8_t *buffer, size_t buffer_len);
-    mceliece_error_t deserialize_private_key(private_key_t *sk, const uint8_t *buffer, size_t buffer_len);
 
     // 测试函数
     void test_mceliece(void);

@@ -24,15 +24,8 @@ mceliece_error_t matrix_rref(matrix_t *mat, int *pivot_cols, int *rank);
 int matrix_is_systematic(const matrix_t *mat);
 int reduce_to_systematic_form(matrix_t *H);
 mceliece_error_t matrix_to_systematic(matrix_t *mat, int *p, matrix_t *T_out);
-// 打印与拷贝
-void print_matrix(const char *label, const matrix_t *mat);
-void matrix_copy(matrix_t *dst, const matrix_t *src);
-
 // 向量操作
 void matrix_vector_multiply(const matrix_t *mat, const uint8_t *vec, uint8_t *result);
-
-// 生成校验矩阵 H = [I | T]
-matrix_t* construct_parity_check_matrix(const matrix_t *T);
 
 // MatGen 与编码
 mceliece_error_t mat_gen(const polynomial_t *g, const gf_elem_t *alpha,

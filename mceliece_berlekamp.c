@@ -154,53 +154,7 @@ mceliece_error_t chien_search(const polynomial_t *sigma, const gf_elem_t *alpha,
     return MCELIECE_SUCCESS;
 }
 
-// Forney算法：计算错误值（对于二元码，错误值总是1）
-mceliece_error_t forney_algorithm(const polynomial_t *sigma, const polynomial_t *omega,
-                                 const gf_elem_t *alpha, const int *error_positions, 
-                                 int num_errors, gf_elem_t *error_values) {
-    if (!sigma || !omega || !alpha || !error_positions || !error_values) {
-        return MCELIECE_ERROR_INVALID_PARAM;
-    }
-    
-    // 计算sigma的形式导数
-    polynomial_t *sigma_prime = polynomial_create(sigma->max_degree);
-    if (!sigma_prime) return MCELIECE_ERROR_MEMORY;
-    
-    // 在GF(2^m)中，多项式的导数只保留奇次项系数
-    for (int i = 1; i <= sigma->degree; i += 2) {
-        if (i - 1 <= sigma_prime->max_degree) {
-            polynomial_set_coeff(sigma_prime, i - 1, sigma->coeffs[i]);
-        }
-    }
-    
-    // 对每个错误位置计算错误值
-    for (int k = 0; k < num_errors; k++) {
-        int pos = error_positions[k];
-        gf_elem_t alpha_k = alpha[pos];
-        
-        if (alpha_k == 0) continue;
-        
-        gf_elem_t alpha_inv = gf_inv(alpha_k);
-        
-        // 计算omega(alpha_k^{-1})
-        gf_elem_t omega_val = polynomial_eval(omega, alpha_inv);
-        
-        // 计算sigma'(alpha_k^{-1})
-        gf_elem_t sigma_prime_val = polynomial_eval(sigma_prime, alpha_inv);
-        
-        if (sigma_prime_val == 0) {
-            polynomial_free(sigma_prime);
-            return MCELIECE_ERROR_DECODE_FAIL;
-        }
-        
-        // 错误值 = alpha_k * omega(alpha_k^{-1}) / sigma'(alpha_k^{-1})
-        gf_elem_t error_val = gf_div(gf_mul(alpha_k, omega_val), sigma_prime_val);
-        error_values[k] = error_val;
-    }
-    
-    polynomial_free(sigma_prime);
-    return MCELIECE_SUCCESS;
-}
+
 
 // 完整的解码算法
 mceliece_error_t decode_goppa(const uint8_t *received, const polynomial_t *g, 

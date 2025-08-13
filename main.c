@@ -10,8 +10,7 @@ extern void run_all_tests(void);
 extern mceliece_error_t mceliece_keygen(public_key_t *pk, private_key_t *sk);
 extern mceliece_error_t mceliece_encap(const public_key_t *pk, uint8_t *ciphertext, uint8_t *session_key);
 extern mceliece_error_t mceliece_decap(const uint8_t *ciphertext, const private_key_t *sk, uint8_t *session_key);
-extern mceliece_error_t serialize_public_key(const public_key_t *pk, uint8_t *buffer, size_t buffer_len);
-extern mceliece_error_t serialize_private_key(const private_key_t *sk, uint8_t *buffer, size_t buffer_len);
+
 
 void print_usage(const char *prog_name) {
     printf("Usage: %s [command]\n", prog_name);

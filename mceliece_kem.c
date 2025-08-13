@@ -373,16 +373,7 @@ mceliece_error_t serialize_public_key(const public_key_t *pk, uint8_t *buffer, s
     return MCELIECE_SUCCESS;
 }
 
-mceliece_error_t deserialize_public_key(public_key_t *pk, const uint8_t *buffer, size_t buffer_len) {
-    if (!pk || !buffer) return MCELIECE_ERROR_INVALID_PARAM;
-    
-    size_t required_len = MCELIECE_M * MCELIECE_T * MCELIECE_K_BYTES;
-    if (buffer_len < required_len) return MCELIECE_ERROR_INVALID_PARAM;
-    
-    memcpy(pk->T.data, buffer, required_len);
-    
-    return MCELIECE_SUCCESS;
-}
+
 
 mceliece_error_t serialize_private_key(const private_key_t *sk, uint8_t *buffer, size_t buffer_len) {
     if (!sk || !buffer) return MCELIECE_ERROR_INVALID_PARAM;
@@ -431,51 +422,7 @@ mceliece_error_t serialize_private_key(const private_key_t *sk, uint8_t *buffer,
     return MCELIECE_SUCCESS;
 }
 
-mceliece_error_t deserialize_private_key(private_key_t *sk, const uint8_t *buffer, size_t buffer_len) {
-    if (!sk || !buffer) return MCELIECE_ERROR_INVALID_PARAM;
-    
-    size_t pos = 0;
-    
-    // delta
-    if (pos + MCELIECE_L_BYTES > buffer_len) return MCELIECE_ERROR_INVALID_PARAM;
-    memcpy(sk->delta, buffer + pos, MCELIECE_L_BYTES);
-    pos += MCELIECE_L_BYTES;
-    
-    // c
-    if (pos + 8 > buffer_len) return MCELIECE_ERROR_INVALID_PARAM;
-    sk->c = 0;
-    for (int i = 0; i < 8; i++) {
-        sk->c |= ((uint64_t)buffer[pos + i]) << (8 * i);
-    }
-    pos += 8;
-    
-    // g多项式
-    size_t g_bytes = MCELIECE_T * ((MCELIECE_M + 7) / 8);
-    if (pos + g_bytes > buffer_len) return MCELIECE_ERROR_INVALID_PARAM;
-    
-    for (int i = 0; i < MCELIECE_T; i++) {
-        gf_elem_t coeff = 0;
-        for (int j = 0; j < (MCELIECE_M + 7) / 8; j++) {
-            coeff |= ((gf_elem_t)buffer[pos + i * ((MCELIECE_M + 7) / 8) + j]) << (8 * j);
-        }
-        sk->g.coeffs[i] = coeff & ((1 << MCELIECE_M) - 1);
-    }
-    sk->g.coeffs[MCELIECE_T] = 1;  // 首一多项式
-    sk->g.degree = MCELIECE_T;
-    pos += g_bytes;
-    
-    // alpha序列（跳过）
-    size_t alpha_bytes = ((2 * MCELIECE_M - 1) * (1 << (MCELIECE_M - 4)) + 7) / 8;
-    if (pos + alpha_bytes > buffer_len) return MCELIECE_ERROR_INVALID_PARAM;
-    pos += alpha_bytes;
-    
-    // s向量
-    if (pos + MCELIECE_N_BYTES > buffer_len) return MCELIECE_ERROR_INVALID_PARAM;
-    memcpy(sk->s, buffer + pos, MCELIECE_N_BYTES);
-    pos += MCELIECE_N_BYTES;
-    
-    return MCELIECE_SUCCESS;
-}
+
 
 // 测试函数
 void test_mceliece(void) {

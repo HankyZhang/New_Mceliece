@@ -112,15 +112,7 @@ void matrix_xor_rows(matrix_t *mat, int row_dst, int row_src) {
     }
 }
 
-// 寻找指定列的第一个非零行（从start_row开始）
-int matrix_find_pivot(const matrix_t *mat, int col, int start_row) {
-    for (int row = start_row; row < mat->rows; row++) {
-        if (matrix_get_bit(mat, row, col)) {
-            return row;
-        }
-    }
-    return -1;  // 未找到
-}
+
 
 
 // 检查矩阵是否为系统形式
@@ -265,31 +257,7 @@ void matrix_vector_multiply(const matrix_t *mat, const uint8_t *vec, uint8_t *re
     }
 }
 
-// 构造完整的校验矩阵H = (I_mt | T)
-matrix_t* construct_parity_check_matrix(const matrix_t *T) {
-    if (!T) return NULL;
-    
-    int mt = T->rows;
-    int total_cols = mt + T->cols;
-    
-    matrix_t *H = matrix_create(mt, total_cols);
-    if (!H) return NULL;
-    
-    // 设置单位矩阵部分 I_mt
-    for (int i = 0; i < mt; i++) {
-        matrix_set_bit(H, i, i, 1);
-    }
-    
-    // 复制T矩阵到右侧
-    for (int row = 0; row < mt; row++) {
-        for (int col = 0; col < T->cols; col++) {
-            int bit = matrix_get_bit(T, row, col);
-            matrix_set_bit(H, row, mt + col, bit);
-        }
-    }
-    
-    return H;
-}
+
 
 // Calculate syndrome according to Classic McEliece specification
 void compute_syndrome(const uint8_t *received, const polynomial_t *g, 
@@ -318,33 +286,5 @@ void compute_syndrome(const uint8_t *received, const polynomial_t *g,
     }
 }
 
-// 打印矩阵（调试用）
-void print_matrix(const char *label, const matrix_t *mat) {
-    printf("%s (%dx%d):\n", label, mat->rows, mat->cols);
-    
-    for (int row = 0; row < mat->rows && row < 16; row++) {  // 打印前 16 行
-        printf("    row %2d: ", row);
-        for (int col = 0; col < mat->cols && col < 32; col++) {  // 打印前 32 列
-            printf("%d", matrix_get_bit(mat, row, col));
-        }
-        if (mat->cols > 32) printf("...");
-        printf("\n");
-    }
 
-    if (mat->rows > 16) printf("...\n");
-    printf("\n");
-}
 
-// 矩阵拷贝
-void matrix_copy(matrix_t *dst, const matrix_t *src) {
-    if (!dst || !src) return;
-    
-    int min_rows = (dst->rows < src->rows) ? dst->rows : src->rows;
-    int min_cols_bytes = (dst->cols_bytes < src->cols_bytes) ? dst->cols_bytes : src->cols_bytes;
-    
-    for (int row = 0; row < min_rows; row++) {
-        memcpy(dst->data + row * dst->cols_bytes,
-               src->data + row * src->cols_bytes,
-               min_cols_bytes);
-    }
-}

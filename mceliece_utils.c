@@ -118,22 +118,9 @@ void public_key_free(public_key_t *pk) {
     }
 }
 
-// 打印字节数组（调试用）
-void print_bytes(const char *label, const uint8_t *data, int len) {
-    printf("%s: ", label);
-    for (int i = 0; i < len; i++) {
-        printf("%02x", data[i]);
-        if (i < len - 1) printf(" ");
-    }
-    printf("\n");
-}
 
-// 字节异或
-void xor_bytes(uint8_t *dst, const uint8_t *src1, const uint8_t *src2, int len) {
-    for (int i = 0; i < len; i++) {
-        dst[i] = src1[i] ^ src2[i];
-    }
-}
+
+
 
 // 矩阵位设置
 void vector_set_bit(uint8_t *vec, int bit_idx, int value) {
@@ -189,12 +176,7 @@ void matrix_set_bit(matrix_t *mat, int row, int col, int bit) {
     }
 }
 
-// 向量位清除
-void vector_clear_bit(uint8_t *vec, int bit_idx) {
-    int byte_idx = bit_idx / 8;
-    int bit_pos = bit_idx % 8;
-    vec[byte_idx] &= ~(1 << bit_pos);
-}
+
 
 // 向量位获取
 int vector_get_bit(const uint8_t *vec, int bit_idx) {
